@@ -114,6 +114,23 @@ para que ese código no exista dentro de ninguna imagen desplegable. Para
 apagarlo alcanza con borrar el servicio del compose y su `location` del nginx;
 no hay ninguna variable que acordarse de poner en `false`.
 
+También trae un botón **"resolver padrón"** por cada cuenta trabada en
+`PENDING_COURSE`. Publica en Kafka el evento que en la plataforma real manda
+Cursos (`tema-02-cursos.validacion-resuelta.v1`), en vez de tocar la base: así
+ejercita el listener, la idempotencia por `eventId` y el mail de padrón
+resuelto. Un `UPDATE` directo daría el mismo estado final sin probar nada de
+eso. Lo mismo desde la terminal: `./scripts/resolver-padron.sh <email>`.
+
+> ⚠️ **`dev-mailbox` se consume como imagen de GHCR**, no se construye desde el
+> compose. Si tocás `dev-mailbox/server.js`, el cambio no corre hasta que
+> republiques la imagen:
+>
+> ```bash
+> docker build -t ghcr.io/412061-ibazeta/dev-mailbox:latest ./dev-mailbox
+> docker push ghcr.io/412061-ibazeta/dev-mailbox:latest
+> docker compose up -d --force-recreate dev-mailbox
+> ```
+
 El widget del front **se dibuja solo si `/dev/mailbox` contesta**. En cualquier
 despliegue sin este contenedor, el `fetch` falla y el botón no aparece — es
 detección por capacidad y no una bandera de build, porque una bandera hay que

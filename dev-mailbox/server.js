@@ -12,10 +12,13 @@
 // borrar el servicio del compose; no hay que acordarse de ninguna variable.
 // ---------------------------------------------------------------------------
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import mysql from 'mysql2/promise';
+import { Kafka } from 'kafkajs';
 
 const PORT = Number(process.env.PORT ?? 4300);
 const LIMITE_MAX = 50;
+const TOPIC_PADRON = process.env.TOPIC_COURSE_VALIDATION ?? 'tema-02-cursos.validacion-resuelta.v1';
 
 const pool = mysql.createPool({
   host: process.env.DB_HOST ?? 'mysql',
@@ -69,6 +72,111 @@ async function mails(limite, email) {
   return filas.map(aMail).filter(Boolean);
 }
 
+// --- Padron -----------------------------------------------------------------
+// Un alumno que activa su email NO queda habilitado: pasa a PENDING_COURSE y
+// espera a que Cursos (Tema 02) valide su padron. Esa validacion llega por
+// Kafka y NO hay endpoint HTTP que la dispare — es asincronica a proposito
+// (DEC-09). Como el equipo de Cursos todavia no existe, nadie publica ese
+// evento y la cuenta se queda esperando para siempre.
+//
+// Esto se hace pasar por Cursos. Publica el evento de verdad en vez de tocar
+// la base a mano: asi ejercita el listener, la idempotencia por eventId y el
+// mail de "padron resuelto". Un UPDATE directo daria el mismo estado final sin
+// probar nada de eso, y taparia justo el pedazo que falla si falla.
+const kafka = new Kafka({
+  clientId: 'dev-mailbox',
+  brokers: (process.env.KAFKA_BROKERS ?? 'kafka:9092').split(','),
+  retry: { retries: 2 },
+});
+
+let productor;
+async function publicar(mensaje) {
+  if (!productor) {
+    productor = kafka.producer();
+    await productor.connect();
+  }
+  await productor.send({ topic: TOPIC_PADRON, messages: [{ value: JSON.stringify(mensaje) }] });
+}
+
+async function cuenta(email) {
+  const [filas] = await pool.query(
+    'SELECT id, email, account_status FROM users WHERE email = ? AND deleted_at IS NULL LIMIT 1',
+    [email],
+  );
+  return filas[0] ?? null;
+}
+
+/** Las que estan esperando el padron: lo unico que este boton puede destrabar. */
+async function pendientes() {
+  const [filas] = await pool.query(
+    `SELECT id, email FROM users
+      WHERE account_status = 'PENDING_COURSE' AND deleted_at IS NULL
+      ORDER BY created_at DESC LIMIT 20`,
+  );
+  return filas;
+}
+
+async function resolverPadron(email, resultado) {
+  const u = await cuenta(email);
+  if (!u) return { ok: false, estado: 404, error: 'No existe ninguna cuenta con ese email.' };
+
+  if (u.account_status === 'ACTIVE') {
+    return { ok: true, ya: true, de: 'ACTIVE', a: 'ACTIVE' };
+  }
+  if (u.account_status !== 'PENDING_COURSE') {
+    return {
+      ok: false,
+      estado: 409,
+      error:
+        u.account_status === 'PENDING_EMAIL'
+          ? 'Todavía no activó el email. Abrí primero el enlace de activación.'
+          : `La cuenta está en ${u.account_status}; esto sólo resuelve PENDING_COURSE.`,
+    };
+  }
+
+  // El listener es idempotente por eventId (DEC-13): uno repetido se descarta
+  // en silencio, por eso cada pedido genera uno nuevo.
+  await publicar({
+    eventId: randomUUID(),
+    eventType: 'VALIDACION_RESUELTA',
+    producer: 'tema-02-cursos',
+    timestamp: new Date().toISOString(),
+    payload: { userId: u.id, resultado: resultado ?? 'APROBADO', cursoId: 'prog4-2026' },
+  });
+
+  // El consumo es asincronico: contestar sin mirar seria mentirle al que apreto.
+  for (let i = 0; i < 15; i++) {
+    await new Promise((r) => setTimeout(r, 400));
+    const ahora = await cuenta(email);
+    if (ahora && ahora.account_status !== 'PENDING_COURSE') {
+      return { ok: true, de: 'PENDING_COURSE', a: ahora.account_status };
+    }
+  }
+  return {
+    ok: false,
+    estado: 504,
+    error: 'El evento se publicó pero el estado no cambió. Mirá los logs de users-service.',
+  };
+}
+
+function leerCuerpo(req) {
+  return new Promise((resolve, reject) => {
+    let datos = '';
+    req.on('data', (c) => {
+      datos += c;
+      if (datos.length > 4096) reject(new Error('cuerpo demasiado grande'));
+    });
+    req.on('end', () => {
+      try {
+        resolve(datos ? JSON.parse(datos) : {});
+      } catch {
+        reject(new Error('cuerpo ilegible'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
 const servidor = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   res.setHeader('Cache-Control', 'no-store');
@@ -78,9 +186,35 @@ const servidor = http.createServer(async (req, res) => {
     return res.end('ok\n');
   }
 
+  const json = (codigo, cuerpo) => {
+    res.writeHead(codigo, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(cuerpo));
+  };
+
+  if (url.pathname === '/dev/pendientes') {
+    try {
+      return json(200, await pendientes());
+    } catch (e) {
+      console.error('PENDIENTES_FALLO', e.message);
+      return json(503, { error: 'la base no responde todavia' });
+    }
+  }
+
+  if (url.pathname === '/dev/resolver-padron') {
+    if (req.method !== 'POST') return json(405, { error: 'usa POST' });
+    try {
+      const { email, resultado } = await leerCuerpo(req);
+      if (!email) return json(400, { error: 'falta email' });
+      const r = await resolverPadron(email, resultado);
+      return json(r.ok ? 200 : r.estado, r);
+    } catch (e) {
+      console.error('PADRON_FALLO', e.message);
+      return json(500, { error: e.message });
+    }
+  }
+
   if (url.pathname !== '/' && url.pathname !== '/dev/mailbox') {
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    return res.end('{"error":"no existe"}');
+    return json(404, { error: 'no existe' });
   }
 
   try {
