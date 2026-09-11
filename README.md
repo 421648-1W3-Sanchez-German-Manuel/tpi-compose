@@ -17,8 +17,9 @@ TPI/
 └── tpi-compose/      ← estás acá
 ```
 
-El compose construye desde `../users`, `../api-gateway`, `../echo-service` y
-`../frontend-users`: los cinco tienen que ser hermanos.
+El compose construye desde `../users`, `../api-gateway`, `../echo-service`,
+`../frontend-users` y `./dev-mailbox`: los repos tienen que ser hermanos de
+`tpi-compose` (y dev-mailbox vive adentro del propio tpi-compose).
 
 ## Levantarlo
 
@@ -121,9 +122,24 @@ ejercita el listener, la idempotencia por `eventId` y el mail de padrón
 resuelto. Un `UPDATE` directo daría el mismo estado final sin probar nada de
 eso. Lo mismo desde la terminal: `./scripts/resolver-padron.sh <email>`.
 
-> ⚠️ **`dev-mailbox` se consume como imagen de GHCR**, no se construye desde el
-> compose. Si tocás `dev-mailbox/server.js`, el cambio no corre hasta que
-> republiques la imagen:
+La tercera pestaña es **Logs**: la traza micro-a-micro que escribe el Gateway
+(`InterMicroTraceFilter`, en `api-gateway`) en una lista de Redis
+(`intermicro:trace`, capada a 200). Cada entrada dice de dónde a dónde fue la
+llamada — `PERSON`/`MS`/`ANON`, destino, método, path, status y ms — y el buzón
+la lee en `/dev/logs` (solo lectura; nada de esto toca Redis).
+
+Para verla en vivo hay un botón **"probar flujo micro → micro"** que dispara el
+round-trip de `echo-service`: el front pega `GET /api/echo/cliente/perfil/{id}`
+con el token de la sesión, echo pide su token de servicio y llama a
+`users-service` por el Gateway. Resultado: tres entradas seguidas —
+`PERSON`→echo, echo pidiendo token, `MS`→users — que dicen lo que iba a decir el
+gif de monitos: la identidad viaja como header `X-*`, y la confianza de los
+micros se respalda acá porque el único camino es el Gateway.
+
+> ⚠️ **En dev se construye desde `./dev-mailbox`**, no desde la imagen. Si tocás
+> `dev-mailbox/server.js` alcanza con `docker compose up -d --build dev-mailbox`.
+> La imagen de GHCR sigue existiendo para los que no tienen este repo; mantenerla
+> al día es:
 >
 > ```bash
 > docker build -t ghcr.io/412061-ibazeta/dev-mailbox:latest ./dev-mailbox

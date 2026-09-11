@@ -105,7 +105,11 @@ services:
   # en PENDING_COURSE, que es asincronica y no tiene endpoint HTTP que la
   # dispare.
   dev-mailbox:
-    image: ghcr.io/412061-ibazeta/dev-mailbox:latest
+    # Dev: se construye local. Publicar la imagen sigue siendo la forma de
+    # compartir el buzon con quienes no tienen este repo (ver README "republicar").
+    build:
+      context: ./dev-mailbox
+      dockerfile: Dockerfile
     container_name: tpi-dev-mailbox
     expose: ["4300"]
     environment:
@@ -115,6 +119,9 @@ services:
       DB_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       KAFKA_BROKERS: kafka:9092
       TOPIC_COURSE_VALIDATION: ${TOPIC_COURSE_VALIDATION:-tema-02-cursos.validacion-resuelta.v1}
+      # De donde lee la pestana Logs: la traza que deja el Gateway en Redis.
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
     depends_on:
       mysql: {condition: service_healthy}
       kafka: {condition: service_healthy}
@@ -337,7 +344,11 @@ services:
   # Es tambien el ejemplo vivo de lo que tiene que hacer un equipo nuevo:
   # mismas redes, mismo expose sin ports, misma registracion en Eureka.
   echo-service:
-    image: ghcr.io/412061-ibazeta/echo-service:latest
+    # Dev: se construye desde el repo hermano ../echo-service. Hoy consume imagen
+    # publicada en produccion; aca el source manda para no correr un binario viejo.
+    build:
+      context: ../echo-service
+      dockerfile: Dockerfile
     container_name: tpi-echo-service
     expose: ["8084","8085"]
     environment:
