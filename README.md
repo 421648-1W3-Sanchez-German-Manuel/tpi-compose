@@ -59,6 +59,7 @@ preflight y no haya CORS que configurar en ninguna parte.
 |---|---|---|
 | `nginx` | `nginx:1.27-alpine` | **3000 publicado** |
 | `webapp` | `../frontend-users` | interno 4200 |
+| `dev-mailbox` | `./dev-mailbox` | interno 4300 · **solo desarrollo** |
 | `eureka` | `steeltoeoss/eureka-server` | **8761 publicado** (es el registro) |
 | `api-gateway` | `../api-gateway` | interno 8080 / 8081 |
 | `users-service` | `../users` | interno 8082 / 8083 |
@@ -96,6 +97,27 @@ gateway ni a los micros. Todo lo que el navegador pide a `/api` lo reenvía el
 proxy. Los estáticos los sirve el nginx interno del front
 (`frontend-users/nginx.conf`), con `try_files` para que un `/activate?token=...`
 abierto directo desde el mail llegue al Router de Angular.
+
+### El buzón de desarrollo
+
+Como no hay servidor de mail, los códigos de 2FA y los enlaces de activación y
+de reset quedan en `outbox_events`. El contenedor `dev-mailbox` los lee y los
+sirve en `/dev/mailbox`; el front dibuja un botón 📬 flotante que los muestra
+con un botón de copiar y se refresca solo.
+
+> ⛔ **No va a producción, ni detrás de un flag.** Lista tokens de activación y
+> códigos de 2FA de **cualquier** cuenta: publicarlo es regalar todas las
+> cuentas sin pedir una sola contraseña.
+
+Está como servicio aparte, y no como endpoint de `users-service`, justamente
+para que ese código no exista dentro de ninguna imagen desplegable. Para
+apagarlo alcanza con borrar el servicio del compose y su `location` del nginx;
+no hay ninguna variable que acordarse de poner en `false`.
+
+El widget del front **se dibuja solo si `/dev/mailbox` contesta**. En cualquier
+despliegue sin este contenedor, el `fetch` falla y el botón no aparece — es
+detección por capacidad y no una bandera de build, porque una bandera hay que
+acordarse de apagarla.
 
 ### Por qué Eureka sí publica puerto
 
@@ -301,7 +323,9 @@ docker compose up -d --force-recreate api-gateway   # volver a 64
   cadena de Security corre antes que el ruteo. Con token válido sí da
   `404 route-not-found`.
 - **No hay servidor de mail.** Los códigos y los enlaces de activación quedan
-  encolados en `outbox_events`:
+  encolados en `outbox_events`. Lo más cómodo es el **buzón flotante** del front
+  (botón 📬 abajo a la derecha, en cualquier pantalla), que los muestra con un
+  botón de copiar. Si preferís la consola:
 
   ```bash
   docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" users \

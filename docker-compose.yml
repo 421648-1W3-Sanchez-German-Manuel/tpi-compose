@@ -90,6 +90,41 @@ services:
         limits:
           memory: 64M
 
+  # Buzon de desarrollo: muestra los codigos de 2FA y los enlaces de activacion
+  # y de reset que quedan en outbox_events, porque no hay servidor de mail.
+  #
+  # ⛔ SOLO DESARROLLO. Lista tokens de activacion de CUALQUIER cuenta, o sea
+  # que publicarlo es regalar todas las cuentas. Esta como servicio aparte y no
+  # como endpoint de users-service a proposito: asi este codigo no existe dentro
+  # de ninguna imagen desplegable, y apagarlo es borrar este bloque — no hay que
+  # acordarse de ninguna variable de entorno.
+  #
+  # Vive en tpi-front (lo consume el navegador via nginx) y en tpi-data (lee
+  # MySQL). NO esta en tpi-platform: no tiene nada que hacer con los micros.
+  dev-mailbox:
+    build:
+      context: ./dev-mailbox
+    container_name: tpi-dev-mailbox
+    expose: ["4300"]
+    environment:
+      DB_HOST: mysql
+      DB_NAME: users
+      DB_USER: root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    depends_on:
+      mysql: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL","wget -qO- --timeout=3 http://127.0.0.1:4300/healthz >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [tpi-front, tpi-data]
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
   # ---------------------------------------------------------------------------
   # Infraestructura
   # ---------------------------------------------------------------------------

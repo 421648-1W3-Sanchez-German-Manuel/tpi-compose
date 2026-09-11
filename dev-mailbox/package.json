@@ -1,0 +1,13 @@
+{
+  "name": "dev-mailbox",
+  "private": true,
+  "type": "module",
+  "description": "Buzon de desarrollo: lee outbox_events y muestra codigos y enlaces. NO va a produccion.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "mysql2": "^3.11.4"
+  }
+}
