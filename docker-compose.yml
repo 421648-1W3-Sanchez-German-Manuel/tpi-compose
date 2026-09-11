@@ -44,11 +44,15 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx/proxy-comun.inc:/etc/nginx/conf.d/proxy-comun.inc:ro
     healthcheck:
-      test: ["CMD-SHELL","wget -qO- --timeout=3 http://localhost:3000/api/users/public/legal/terms >/dev/null 2>&1 || exit 1"]
+      # 127.0.0.1 y NO localhost: nginx escucha en 0.0.0.0:3000 (solo IPv4) y
+      # dentro del contenedor localhost resuelve tambien a ::1, que es lo que
+      # el wget de busybox intenta primero. Con `localhost` la sonda da
+      # "connection refused" y el contenedor queda unhealthy sirviendo perfecto.
+      test: ["CMD-SHELL","wget -qO- --timeout=3 http://127.0.0.1:3000/healthz >/dev/null 2>&1 || exit 1"]
       interval: 15s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 5
+      start_period: 10s
     depends_on:
       api-gateway: {condition: service_healthy}
     networks: [tpi-edge, tpi-front]
