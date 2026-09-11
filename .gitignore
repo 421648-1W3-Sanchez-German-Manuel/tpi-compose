@@ -1,0 +1,3 @@
+# DEC-18: las claves RS256 no entran ni a la imagen ni al repo
+secrets/
+.env

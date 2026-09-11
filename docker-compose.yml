@@ -1,0 +1,196 @@
+# Plataforma Gamificada TUP · Tema 01 — stack local
+#
+# Materializa DEC-40 (SPEC-api-gateway.md §16.2). El nombre del proyecto es
+# `tpi-compose` para que se distinga del resto en Docker Desktop.
+#
+#   docker compose up -d --build
+#   docker compose logs -f api-gateway
+#   docker compose down          (agrega -v para borrar tambien los datos)
+name: tpi-compose
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Infraestructura
+  # ---------------------------------------------------------------------------
+
+  # Eureka es del Tema 01: el registro solo lo usan el gateway y el
+  # users-service para encontrarse. No es infra compartida como Kafka.
+  # Imagen de terceros, provisoria hasta que exista el servidor propio; ahi
+  # esto pasa a ser `build: ../eureka-server`, igual que los otros dos.
+  eureka:
+    image: steeltoeoss/eureka-server:latest
+    container_name: tpi-eureka
+    expose: ["8761"]
+    healthcheck:
+      # La imagen trae wget y sh, no curl ni bash.
+      test: ["CMD-SHELL","wget -qO- --timeout=3 http://localhost:8761/actuator/health | grep -q UP"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks: [tpi]
+
+  mysql:
+    image: mysql:8.4                          # DEC-20 · LTS
+    container_name: tpi-mysql
+    environment:
+      MYSQL_DATABASE: users
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?falta MYSQL_ROOT_PASSWORD en .env}
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_0900_ai_ci
+      --default-time-zone=+00:00
+    expose: ["3306"]
+    volumes: [mysql-data:/var/lib/mysql]
+    healthcheck:
+      test: ["CMD","mysqladmin","ping","-h","localhost","-uroot","-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks: [tpi]
+
+  redis:
+    image: redis:7-alpine
+    container_name: tpi-redis
+    # Persistencia: session:{userId} no tiene TTL, Redis aca es el registro de
+    # sesiones y no un cache. Sin AOF, un reinicio desloguea a todo el mundo.
+    command: ["redis-server","--appendonly","yes"]
+    expose: ["6379"]
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: ["CMD","redis-cli","ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks: [tpi]
+
+  # Kafka no es del Tema 01: el broker es infra compartida de la plataforma y
+  # los topics son un contrato con el equipo que los posee (AGENTS.md). Este es
+  # un broker local de desarrollo. Ojo con auto-create al enchufar el real.
+  kafka:
+    image: apache/kafka:3.8.0                 # KRaft, sin Zookeeper
+    container_name: tpi-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Un solo broker: todo replication factor 1 o los topics internos no arrancan.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: tpi-tema-01-cluster
+    expose: ["9092"]
+    volumes: [kafka-data:/var/lib/kafka/data]
+    healthcheck:
+      test: ["CMD-SHELL","/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    networks: [tpi]
+
+  # ---------------------------------------------------------------------------
+  # Microservicios
+  # ---------------------------------------------------------------------------
+
+  users-service:
+    build:
+      context: ../users
+      dockerfile: ../tpi-compose/users.Dockerfile
+    container_name: tpi-users-service
+    # SIN "ports:" A PROPOSITO (U11 / manifiesto §06, DEC-08).
+    # Es lo que hace confiables los headers X-*: nadie puede saltearse el
+    # Gateway. Con 8082 publicado, un DELETE /api/users/{id} con
+    # "X-User-Roles: ADMIN" inventado entra sin password, sin token y sin 2FA.
+    expose: ["8082","8083"]                   # DEC-28
+    environment:
+      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/users?connectionTimeZone=UTC&preserveInstants=true"
+      DB_USER: root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      KAFKA_SERVERS: kafka:9092
+      EUREKA_URL: http://eureka:8761/eureka/
+      JWT_PRIVATE_KEY_PATH: /run/secrets/jwt-private.pem   # DEC-18
+      JWT_PUBLIC_KEYS_DIR: /run/secrets/jwks
+      JWT_ACTIVE_KID: ${JWT_ACTIVE_KID:-dev}
+      USERS_FRONT_URL: ${USERS_FRONT_URL:-http://localhost:4200}
+      ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@frc.utn.edu.ar}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
+    volumes:
+      - ./secrets:/run/secrets:ro             # gitignoreado. NUNCA en el repo
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      eureka: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL","wget -qO- http://localhost:8083/actuator/health/readiness | grep -q UP"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    networks: [tpi]
+
+  api-gateway:
+    build:
+      context: ../api-gateway
+      dockerfile: Dockerfile
+    container_name: tpi-api-gateway
+    ports: ["8080:8080"]                      # EL UNICO puerto publicado. DEC-28
+    expose: ["8081"]                          # management, solo red interna
+    environment:
+      JWKS_URI: http://users-service:8082/.well-known/jwks.json
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      EUREKA_URL: http://eureka:8761/eureka/
+    depends_on:
+      users-service: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      eureka: {condition: service_healthy}
+    networks: [tpi]
+
+
+  # Servicio de prueba del subsistema. Se comporta igual que cualquier otro
+  # micro: no valida el JWT, confia en los headers X-* y no publica su puerto.
+  # Da el SEGUNDO destino real, sin el cual no se puede demostrar que la
+  # identidad llega a un micro que no es users, ni que el `aud` de un token de
+  # servicio acota el alcance a un unico destino.
+  echo-service:
+    build:
+      context: ../echo-service
+      dockerfile: Dockerfile
+    container_name: tpi-echo-service
+    expose: ["8084","8085"]
+    environment:
+      GATEWAY_URL: http://api-gateway:8080
+      EUREKA_URL: http://eureka:8761/eureka/
+      ECHO_CLIENT_ID: ${ECHO_CLIENT_ID:-echo-service}
+      ECHO_CLIENT_SECRET: ${ECHO_CLIENT_SECRET:-}
+    depends_on:
+      eureka: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL","wget -qO- http://localhost:8085/actuator/health/readiness | grep -q UP"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    networks: [tpi]
+
+networks:
+  tpi:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  redis-data:
+  kafka-data:
