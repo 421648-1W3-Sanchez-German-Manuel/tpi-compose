@@ -6,22 +6,73 @@
 #   docker compose up -d --build
 #   docker compose logs -f api-gateway
 #   docker compose down          (agrega -v para borrar tambien los datos)
+#
+# ---------------------------------------------------------------------------
+# TOPOLOGIA DE REDES — lo primero que hay que entender de este archivo
+# ---------------------------------------------------------------------------
+#
+#   navegador ──► nginx :3000 ──► api-gateway ──► users / echo / los que vengan
+#                 [tpi-edge]      [tpi-platform]
+#
+#   tpi-front     nginx + el front. El front NO comparte red con el gateway,
+#                 asi que no hay forma de pegarle directo ni por error.
+#   tpi-edge      nginx + api-gateway. Nada mas entra aca.
+#   tpi-platform  gateway + eureka + kafka + los micros. ES LA RED COMPARTIDA:
+#                 los otros equipos se enganchan a esta y a ninguna otra.
+#   tpi-data      mysql + redis + quien tenga derecho a leerlos. Fuera de la
+#                 red compartida a proposito: un micro de otro equipo se
+#                 registra en Eureka, no le hablan a nuestra base.
+#
+# El UNICO puerto publicado del stack es el 3000 de nginx (mas el 8761 de
+# Eureka, que es el registro y tiene que ser alcanzable — ver ahi).
 name: tpi-compose
 
 services:
 
   # ---------------------------------------------------------------------------
+  # Borde
+  # ---------------------------------------------------------------------------
+
+  # La puerta. Ver nginx/nginx.conf para el por que; en dos lineas: el navegador
+  # habla con un solo origen, asi no hay preflight y no hace falta CORS en
+  # ningun lado, y el gateway deja de publicar puerto.
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: tpi-nginx
+    ports: ["3000:3000"]
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/proxy-comun.inc:/etc/nginx/conf.d/proxy-comun.inc:ro
+    healthcheck:
+      test: ["CMD-SHELL","wget -qO- --timeout=3 http://localhost:3000/api/users/public/legal/terms >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    depends_on:
+      api-gateway: {condition: service_healthy}
+    networks: [tpi-edge, tpi-front]
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+  # ---------------------------------------------------------------------------
   # Infraestructura
   # ---------------------------------------------------------------------------
 
-  # Eureka es del Tema 01: el registro solo lo usan el gateway y el
-  # users-service para encontrarse. No es infra compartida como Kafka.
-  # Imagen de terceros, provisoria hasta que exista el servidor propio; ahi
-  # esto pasa a ser `build: ../eureka-server`, igual que los otros dos.
+  # El registro. Imagen de terceros, provisoria hasta que exista el servidor
+  # propio; ahi esto pasa a ser `build: ../eureka-server`.
+  #
+  # Publica 8761 A PROPOSITO, y es la unica excepcion a "un solo puerto":
+  # un equipo que corre su micro desde el IDE necesita una direccion a la cual
+  # registrarse. Publicar el registro no expone nada — Eureka solo dice quien
+  # esta vivo, y estar registrado NO alcanza para que el gateway te rutee
+  # (hace falta la allowlist, ver GATEWAY_ALLOWLIST mas abajo).
   eureka:
     image: steeltoeoss/eureka-server:latest
     container_name: tpi-eureka
-    expose: ["8761"]
+    ports: ["8761:8761"]
     healthcheck:
       # La imagen trae wget y sh, no curl ni bash.
       test: ["CMD-SHELL","wget -qO- --timeout=3 http://localhost:8761/actuator/health | grep -q UP"]
@@ -29,7 +80,11 @@ services:
       timeout: 5s
       retries: 30
       start_period: 30s
-    networks: [tpi]
+    networks: [tpi-platform]
+    deploy:
+      resources:
+        limits:
+          memory: 384M
 
   mysql:
     image: mysql:8.4                          # DEC-20 · LTS
@@ -49,7 +104,11 @@ services:
       timeout: 5s
       retries: 30
       start_period: 20s
-    networks: [tpi]
+    networks: [tpi-data]
+    deploy:
+      resources:
+        limits:
+          memory: 1G
 
   redis:
     image: redis:7-alpine
@@ -64,15 +123,21 @@ services:
       interval: 5s
       timeout: 3s
       retries: 30
-    networks: [tpi]
+    networks: [tpi-data]
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   # Kafka no es del Tema 01: el broker es infra compartida de la plataforma y
   # los topics son un contrato con el equipo que los posee (AGENTS.md). Este es
   # un broker local de desarrollo. Ojo con auto-create al enchufar el real.
+  # Va en tpi-platform porque los otros equipos tambien publican y consumen.
   kafka:
     image: apache/kafka:3.8.0                 # KRaft, sin Zookeeper
     container_name: tpi-kafka
     environment:
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms256m"
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
@@ -96,7 +161,11 @@ services:
       timeout: 10s
       retries: 30
       start_period: 30s
-    networks: [tpi]
+    networks: [tpi-platform]
+    deploy:
+      resources:
+        limits:
+          memory: 1G
 
   # ---------------------------------------------------------------------------
   # Microservicios
@@ -123,7 +192,7 @@ services:
       JWT_PRIVATE_KEY_PATH: /run/secrets/jwt-private.pem   # DEC-18
       JWT_PUBLIC_KEYS_DIR: /run/secrets/jwks
       JWT_ACTIVE_KID: ${JWT_ACTIVE_KID:-dev}
-      USERS_FRONT_URL: ${USERS_FRONT_URL:-http://localhost:4200}
+      USERS_FRONT_URL: ${USERS_FRONT_URL:-http://localhost:3000}
       ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@frc.utn.edu.ar}
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
     volumes:
@@ -139,32 +208,61 @@ services:
       timeout: 5s
       retries: 30
       start_period: 60s
-    networks: [tpi]
+    networks: [tpi-platform, tpi-data]
+    deploy:
+      resources:
+        limits:
+          memory: 768M
 
   api-gateway:
     build:
       context: ../api-gateway
       dockerfile: Dockerfile
     container_name: tpi-api-gateway
-    ports: ["8080:8080"]                      # EL UNICO puerto publicado. DEC-28
-    expose: ["8081"]                          # management, solo red interna
+    # YA NO PUBLICA PUERTO. La puerta es nginx:3000. El gateway vive en
+    # tpi-edge, donde el unico que lo alcanza es nginx.
+    expose: ["8080","8081"]                   # 8081 = management, red interna
     environment:
       JWKS_URI: http://users-service:8082/.well-known/jwks.json
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       EUREKA_URL: http://eureka:8761/eureka/
+      # AQUI SE DA DE ALTA A UN EQUIPO NUEVO. Separado por comas, sin espacios.
+      # Reemplaza entera la lista del application.yml. Registrarse en Eureka no
+      # alcanza: fuera de esta lista, /api/{loquesea}/** devuelve 404.
+      # Despues de tocarla: docker compose up -d api-gateway
+      GATEWAY_ALLOWLIST: ${GATEWAY_ALLOWLIST:-users-service,echo-service}
+      # DEC-42 · concurrencia maxima POR DESTINO (BulkheadFilter). Bajarlo a 1
+      # es la forma de comprobar que el bulkhead esta vivo: con carga paralela
+      # tienen que aparecer 503 y lineas BULKHEAD_LLENO en el log.
+      BULKHEAD_ENABLED: ${BULKHEAD_ENABLED:-true}
+      BULKHEAD_MAX_CONCURRENT: ${BULKHEAD_MAX_CONCURRENT:-64}
     depends_on:
       users-service: {condition: service_healthy}
       redis: {condition: service_healthy}
       eureka: {condition: service_healthy}
-    networks: [tpi]
-
+    # El unico servicio publico era el unico sin sonda. Va contra el management
+    # port, que SecurityConfig deja en permitAll solo para /actuator/health/**.
+    healthcheck:
+      test: ["CMD-SHELL","wget -qO- http://localhost:8081/actuator/health/readiness | grep -q UP"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+    networks: [tpi-edge, tpi-platform, tpi-data]
+    deploy:
+      resources:
+        limits:
+          memory: 768M
 
   # Servicio de prueba del subsistema. Se comporta igual que cualquier otro
   # micro: no valida el JWT, confia en los headers X-* y no publica su puerto.
   # Da el SEGUNDO destino real, sin el cual no se puede demostrar que la
   # identidad llega a un micro que no es users, ni que el `aud` de un token de
   # servicio acota el alcance a un unico destino.
+  #
+  # Es tambien el ejemplo vivo de lo que tiene que hacer un equipo nuevo:
+  # mismas redes, mismo expose sin ports, misma registracion en Eureka.
   echo-service:
     build:
       context: ../echo-service
@@ -184,10 +282,41 @@ services:
       timeout: 5s
       retries: 30
       start_period: 40s
-    networks: [tpi]
+    networks: [tpi-platform]
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
+# ---------------------------------------------------------------------------
+# Redes
+# ---------------------------------------------------------------------------
 networks:
-  tpi:
+  # Front <-> nginx. El dia que exista el repo del front, su contenedor va SOLO
+  # aca: sin membresia en tpi-edge no tiene ruta hacia el gateway.
+  tpi-front:
+    driver: bridge
+
+  # nginx <-> gateway. Dos miembros y punto.
+  tpi-edge:
+    driver: bridge
+
+  # LA RED COMPARTIDA de la plataforma. `name` fijo (sin el prefijo del
+  # proyecto) para que el compose de otro equipo la pueda referenciar tal cual:
+  #
+  #     networks:
+  #       tpi-platform:
+  #         external: true
+  #
+  # La crea este compose, asi que nuestro stack tiene que estar arriba primero
+  # — cosa que igual hace falta, porque ahi viven Eureka y el gateway.
+  tpi-platform:
+    name: tpi-platform
+    driver: bridge
+
+  # MySQL y Redis. Deliberadamente fuera de la red compartida: un equipo que se
+  # suma se registra en Eureka y habla por el gateway, no le pega a nuestra base.
+  tpi-data:
     driver: bridge
 
 volumes:

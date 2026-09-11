@@ -1,0 +1,9 @@
+# Los .sh corren dentro de contenedores Linux y desde bash. Con CRLF, bash
+# falla con un `$'\r': command not found` que no dice nada sobre la causa.
+# Esto los fuerza a LF en el checkout, tambien en Windows.
+*.sh text eol=lf
+*.inc text eol=lf
+nginx/* text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+*.yml text eol=lf
