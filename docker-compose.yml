@@ -102,8 +102,7 @@ services:
   # Vive en tpi-front (lo consume el navegador via nginx) y en tpi-data (lee
   # MySQL). NO esta en tpi-platform: no tiene nada que hacer con los micros.
   dev-mailbox:
-    build:
-      context: ./dev-mailbox
+    image: ghcr.io/412061-ibazeta/dev-mailbox:latest
     container_name: tpi-dev-mailbox
     expose: ["4300"]
     environment:
@@ -332,9 +331,7 @@ services:
   # Es tambien el ejemplo vivo de lo que tiene que hacer un equipo nuevo:
   # mismas redes, mismo expose sin ports, misma registracion en Eureka.
   echo-service:
-    build:
-      context: ../echo-service
-      dockerfile: Dockerfile
+    image: ghcr.io/412061-ibazeta/echo-service:latest
     container_name: tpi-echo-service
     expose: ["8084","8085"]
     environment:
