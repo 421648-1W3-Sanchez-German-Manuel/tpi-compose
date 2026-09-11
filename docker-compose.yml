@@ -55,7 +55,36 @@ services:
       start_period: 10s
     depends_on:
       api-gateway: {condition: service_healthy}
+      webapp: {condition: service_healthy}
     networks: [tpi-edge, tpi-front]
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+  # La SPA de Angular, servida como estaticos por su propio nginx.
+  #
+  # Vive SOLO en tpi-front. No tiene membresia en tpi-edge ni en tpi-platform,
+  # asi que desde este contenedor no hay ruta al gateway ni a los micros: todo
+  # lo que el navegador pide a /api lo reenvia el proxy del borde. Esa es la
+  # mitad estructural de "el front no le pega directo al gateway"; la otra
+  # mitad es que el navegador solo conoce el :3000.
+  webapp:
+    build:
+      context: ../frontend-users
+      dockerfile: Dockerfile
+    container_name: tpi-webapp
+    # SIN ports: se llega por el 3000 del proxy, como todo lo demas.
+    expose: ["4200"]
+    healthcheck:
+      # 127.0.0.1 y no localhost: nginx escucha solo en IPv4 y el wget de
+      # busybox intenta ::1 primero (ver la sonda del proxy, mismo caso).
+      test: ["CMD-SHELL","wget -qO- --timeout=3 http://127.0.0.1:4200/healthz >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [tpi-front]
     deploy:
       resources:
         limits:

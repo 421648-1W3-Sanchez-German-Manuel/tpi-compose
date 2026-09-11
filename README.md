@@ -10,14 +10,15 @@ Materializa **DEC-40** (`api-gateway/docs/SPEC-api-gateway.md` §16).
 
 ```
 TPI/
-├── users/           repo del users-service
-├── api-gateway/     repo del gateway
-├── echo-service/    servicio de prueba del subsistema
-└── tpi-compose/     ← estás acá
+├── users/            repo del users-service
+├── api-gateway/      repo del gateway
+├── echo-service/     servicio de prueba del subsistema
+├── frontend-users/   la SPA de Angular
+└── tpi-compose/      ← estás acá
 ```
 
-El compose construye desde `../users`, `../api-gateway` y `../echo-service`:
-los cuatro tienen que ser hermanos.
+El compose construye desde `../users`, `../api-gateway`, `../echo-service` y
+`../frontend-users`: los cinco tienen que ser hermanos.
 
 ## Levantarlo
 
@@ -26,7 +27,7 @@ cd tpi-compose
 bash ../users/scripts/gen-dev-keys.sh dev    # claves RS256 de desarrollo
 cp .env.example .env                         # y completá MYSQL_ROOT_PASSWORD
 
-docker compose up -d --build                 # la primera vez compila los tres servicios
+docker compose up -d --build                 # la primera vez compila los cuatro servicios
 docker compose logs -f api-gateway
 ```
 
@@ -37,14 +38,19 @@ de identidad no tiene que levantar con claves improvisadas.
 ## Topología
 
 ```
-navegador ──► nginx :3000 ──► api-gateway ──► users-service
-              [tpi-edge]      [tpi-platform]   echo-service
-                                               (y los que vengan)
+                          ┌──► webapp (Angular)   [tpi-front]
+navegador ──► nginx :3000 ─┤
+              [tpi-edge]   └──► api-gateway ──► users-service
+                                [tpi-platform]  echo-service
+                                                (y los que vengan)
 ```
+
+El front y la API salen por el **mismo origen** (`:3000`). De ahí que no exista
+preflight y no haya CORS que configurar en ninguna parte.
 
 | Red | Quién vive ahí | Para qué |
 |---|---|---|
-| `tpi-front` | nginx + el front (cuando exista) | El front **no comparte red con el gateway**: no hay forma de pegarle directo, ni por error |
+| `tpi-front` | nginx + `webapp` | El front **no comparte red con el gateway**: no hay forma de pegarle directo, ni por error |
 | `tpi-edge` | nginx + api-gateway | Dos miembros y punto |
 | **`tpi-platform`** | gateway, eureka, kafka, los micros | **La red compartida.** Es a la que se enganchan los otros equipos |
 | `tpi-data` | mysql + redis (+ quien los usa) | Fuera de la red compartida: un micro ajeno se registra en Eureka, no le habla a nuestra base |
@@ -52,6 +58,7 @@ navegador ──► nginx :3000 ──► api-gateway ──► users-service
 | Servicio | Imagen / build | Puerto |
 |---|---|---|
 | `nginx` | `nginx:1.27-alpine` | **3000 publicado** |
+| `webapp` | `../frontend-users` | interno 4200 |
 | `eureka` | `steeltoeoss/eureka-server` | **8761 publicado** (es el registro) |
 | `api-gateway` | `../api-gateway` | interno 8080 / 8081 |
 | `users-service` | `../users` | interno 8082 / 8083 |
@@ -83,8 +90,12 @@ Dos razones, y las dos son estructurales:
 2. **El gateway deja de publicar puerto.** El front vive en `tpi-front` y el
    gateway en `tpi-edge`: sin red en común, no hay ruta.
 
-Ver `nginx/nginx.conf`. Cuando exista el repo del front, su contenedor va **solo**
-en `tpi-front` y el `location /` del nginx pasa a apuntarle.
+Ver `nginx/nginx.conf`. El contenedor del front vive **solo** en `tpi-front`,
+sin membresía en `tpi-edge` ni en `tpi-platform`: desde ahí no hay ruta al
+gateway ni a los micros. Todo lo que el navegador pide a `/api` lo reenvía el
+proxy. Los estáticos los sirve el nginx interno del front
+(`frontend-users/nginx.conf`), con `try_files` para que un `/activate?token=...`
+abierto directo desde el mail llegue al Router de Angular.
 
 ### Por qué Eureka sí publica puerto
 
@@ -298,6 +309,10 @@ docker compose up -d --force-recreate api-gateway   # volver a 64
         ORDER BY created_at DESC LIMIT 5\G"
   ```
 
+- **Si tu `.env` es viejo, `USERS_FRONT_URL` dice `:4200` y los enlaces de
+  activación y de reset del mail quedan muertos** — ese puerto no se publica.
+  Tiene que decir `http://localhost:3000`. El `.env.example` ya está bien; el
+  `.env` de cada uno no se actualiza solo.
 - **Cambiar la password cierra la sesión.** Hay que volver a entrar.
 - **Los límites por email son de 15 minutos**: 5 fallos de login, 5 desafíos de
   2FA y 3 pedidos de reset. Un `429` en desarrollo suele ser eso y no un bug.
