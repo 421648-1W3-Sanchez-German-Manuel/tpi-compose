@@ -105,8 +105,9 @@ services:
   # en PENDING_COURSE, que es asincronica y no tiene endpoint HTTP que la
   # dispare.
   dev-mailbox:
-    # Dev: se construye local. Publicar la imagen sigue siendo la forma de
-    # compartir el buzon con quienes no tienen este repo (ver README "republicar").
+    # Dev: se construye local pero taguea el nombre de GHCR, asi el build y la
+    # imagen publicada son la misma cosa (ver README "republicar").
+    image: ghcr.io/412061-ibazeta/dev-mailbox:latest
     build:
       context: ./dev-mailbox
       dockerfile: Dockerfile
@@ -125,6 +126,7 @@ services:
     depends_on:
       mysql: {condition: service_healthy}
       kafka: {condition: service_healthy}
+      redis: {condition: service_healthy}
     healthcheck:
       test: ["CMD-SHELL","wget -qO- --timeout=3 http://127.0.0.1:4300/healthz >/dev/null 2>&1 || exit 1"]
       interval: 15s
@@ -344,8 +346,9 @@ services:
   # Es tambien el ejemplo vivo de lo que tiene que hacer un equipo nuevo:
   # mismas redes, mismo expose sin ports, misma registracion en Eureka.
   echo-service:
-    # Dev: se construye desde el repo hermano ../echo-service. Hoy consume imagen
-    # publicada en produccion; aca el source manda para no correr un binario viejo.
+    # Dev: se construye desde el repo hermano pero taguea el nombre de GHCR,
+    # para no correr un binario viejo y mantener la imagen al dia con el build.
+    image: ghcr.io/412061-ibazeta/echo-service:latest
     build:
       context: ../echo-service
       dockerfile: Dockerfile

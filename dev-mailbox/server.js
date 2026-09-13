@@ -221,7 +221,11 @@ const servidor = http.createServer(async (req, res) => {
 
   if (url.pathname === '/dev/logs') {
     try {
-      const limite = Math.min(Number(url.searchParams.get('limit')) || 20, LIMITE_MAX);
+      const param = url.searchParams.get('limit');
+      const num = param === null || param.trim() === '' ? NaN : Number(param);
+      const limite = Number.isFinite(num)
+        ? Math.min(Math.max(Math.floor(num), 1), LIMITE_MAX)
+        : 20;
       const filas = await redis.lrange(REDIS_KEY_TRACE, 0, limite - 1);
       // El Gateway ya guarda JSON armado; una fila ilegible no tumba el buzon.
       const logs = filas
@@ -256,7 +260,11 @@ const servidor = http.createServer(async (req, res) => {
   }
 
   try {
-    const limite = Math.min(Number(url.searchParams.get('limit')) || 20, LIMITE_MAX);
+    const param = url.searchParams.get('limit');
+    const num = param === null || param.trim() === '' ? NaN : Number(param);
+    const limite = Number.isFinite(num)
+      ? Math.min(Math.max(Math.floor(num), 1), LIMITE_MAX)
+      : 20;
     const cuerpo = await mails(limite, url.searchParams.get('email') || null);
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(cuerpo));

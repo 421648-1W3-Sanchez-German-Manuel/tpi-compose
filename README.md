@@ -136,15 +136,14 @@ con el token de la sesión, echo pide su token de servicio y llama a
 gif de monitos: la identidad viaja como header `X-*`, y la confianza de los
 micros se respalda acá porque el único camino es el Gateway.
 
-> ⚠️ **En dev se construye desde `./dev-mailbox`**, no desde la imagen. Si tocás
-> `dev-mailbox/server.js` alcanza con `docker compose up -d --build dev-mailbox`.
-> La imagen de GHCR sigue existiendo para los que no tienen este repo; mantenerla
-> al día es:
+> ⚠️ **En dev se construye desde `./dev-mailbox` con el nombre de la imagen de
+> GHCR.** Si tocás `dev-mailbox/server.js` alcanza con
+> `docker compose up -d --build dev-mailbox`. La imagen de GHCR sigue existiendo
+> para los que no tienen este repo; mantenerla al día es:
 >
 > ```bash
-> docker build -t ghcr.io/412061-ibazeta/dev-mailbox:latest ./dev-mailbox
+> docker compose build dev-mailbox
 > docker push ghcr.io/412061-ibazeta/dev-mailbox:latest
-> docker compose up -d --force-recreate dev-mailbox
 > ```
 
 El widget del front **se dibuja solo si `/dev/mailbox` contesta**. En cualquier
