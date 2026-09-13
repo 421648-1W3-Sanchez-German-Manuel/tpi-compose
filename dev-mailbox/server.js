@@ -1,6 +1,9 @@
 // Buzon de desarrollo. Lee outbox_events y devuelve los mails ya masticados:
 // destinatario, tipo, y el codigo de 6 digitos o el enlace, que es lo unico
-// que uno necesita para seguir un flujo a mano.
+// que uno necesita para seguir un flujo a mano. Ademas sirve /dev/logs, la
+// traza micro-a-micro que deja el Gateway en Redis: de donde a donde fue cada
+// llamada, con status y timing. Eso no sale de la base: sale de la lista
+// `intermicro:trace` que escribe api-gateway.
 //
 // ---------------------------------------------------------------------------
 // ESTO NO VA A PRODUCCION. NI DETRAS DE UN FLAG.
@@ -15,10 +18,27 @@ import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import mysql from 'mysql2/promise';
 import { Kafka } from 'kafkajs';
+import Redis from 'ioredis';
 
 const PORT = Number(process.env.PORT ?? 4300);
 const LIMITE_MAX = 50;
+const LIMITE_LOGS_MAX = 200;
 const TOPIC_PADRON = process.env.TOPIC_COURSE_VALIDATION ?? 'tema-02-cursos.validacion-resuelta.v1';
+
+// La lista de traza que escribe el Gateway (InterMicroTraceFilter) con una
+// entrada por llamada enrutada a un micro: origen (persona/servicio), destino,
+// timing y status. El buzon la lee para la pestana Logs; nunca la escribe.
+const REDIS_KEY_TRACE = 'intermicro:trace';
+
+// lazyConnect a proposito: el buzon arranca junto con el stack y Redis (y el
+// resto) pueden tardar; sin esto una conexion fallida al boot haria caer el
+// container entero. Recien se conecta cuando alguien abre /dev/logs.
+const redis = new Redis({
+  host: process.env.REDIS_HOST ?? 'redis',
+  port: Number(process.env.REDIS_PORT ?? 6379),
+  lazyConnect: true,
+  maxRetriesPerRequest: 1,
+});
 
 const pool = mysql.createPool({
   host: process.env.DB_HOST ?? 'mysql',
@@ -200,6 +220,29 @@ const servidor = http.createServer(async (req, res) => {
     }
   }
 
+  if (url.pathname === '/dev/logs') {
+    try {
+      const param = url.searchParams.get('limit');
+      const num = param === null || param.trim() === '' ? NaN : Number(param);
+      const limite = Number.isFinite(num)
+        ? Math.min(Math.max(Math.floor(num), 1), LIMITE_LOGS_MAX)
+        : 20;
+      const filas = await redis.lrange(REDIS_KEY_TRACE, 0, limite - 1);
+      // El Gateway ya guarda JSON armado; una fila ilegible no tumba el buzon.
+      const logs = filas
+        .map((f) => {
+          try { return JSON.parse(f); } catch { return null; }
+        })
+        .filter(Boolean);
+      return json(200, logs);
+    } catch (e) {
+      // Redis puede no estar listo al primer refresco: contestar 503 y dejar
+      // que el front reintente en el proximo ciclo.
+      console.error('LOGS_FALLO', e.message);
+      return json(503, { error: 'redis no responde todavia' });
+    }
+  }
+
   if (url.pathname === '/dev/resolver-padron') {
     if (req.method !== 'POST') return json(405, { error: 'usa POST' });
     try {
@@ -218,7 +261,11 @@ const servidor = http.createServer(async (req, res) => {
   }
 
   try {
-    const limite = Math.min(Number(url.searchParams.get('limit')) || 20, LIMITE_MAX);
+    const param = url.searchParams.get('limit');
+    const num = param === null || param.trim() === '' ? NaN : Number(param);
+    const limite = Number.isFinite(num)
+      ? Math.min(Math.max(Math.floor(num), 1), LIMITE_MAX)
+      : 20;
     const cuerpo = await mails(limite, url.searchParams.get('email') || null);
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(cuerpo));

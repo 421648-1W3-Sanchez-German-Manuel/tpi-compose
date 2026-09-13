@@ -1,4 +1,5 @@
-# Buzon de desarrollo. Una sola dependencia (el driver de MySQL) y un archivo.
+# Buzon de desarrollo. Dependencias ligeras (driver de MySQL, ioredis para la
+# traza del Gateway, kafkajs para resolver padrones) y un archivo.
 FROM node:22-alpine
 WORKDIR /app
 
