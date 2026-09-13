@@ -22,6 +22,7 @@ import Redis from 'ioredis';
 
 const PORT = Number(process.env.PORT ?? 4300);
 const LIMITE_MAX = 50;
+const LIMITE_LOGS_MAX = 200;
 const TOPIC_PADRON = process.env.TOPIC_COURSE_VALIDATION ?? 'tema-02-cursos.validacion-resuelta.v1';
 
 // La lista de traza que escribe el Gateway (InterMicroTraceFilter) con una
@@ -224,7 +225,7 @@ const servidor = http.createServer(async (req, res) => {
       const param = url.searchParams.get('limit');
       const num = param === null || param.trim() === '' ? NaN : Number(param);
       const limite = Number.isFinite(num)
-        ? Math.min(Math.max(Math.floor(num), 1), LIMITE_MAX)
+        ? Math.min(Math.max(Math.floor(num), 1), LIMITE_LOGS_MAX)
         : 20;
       const filas = await redis.lrange(REDIS_KEY_TRACE, 0, limite - 1);
       // El Gateway ya guarda JSON armado; una fila ilegible no tumba el buzon.

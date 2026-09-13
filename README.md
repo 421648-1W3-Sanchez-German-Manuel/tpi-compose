@@ -28,7 +28,7 @@ cd tpi-compose
 bash ../users/scripts/gen-dev-keys.sh dev    # claves RS256 de desarrollo
 cp .env.example .env                         # y completá MYSQL_ROOT_PASSWORD
 
-docker compose up -d --build                 # la primera vez compila los cuatro servicios
+docker compose up -d --build                 # la primera vez compila los cinco servicios
 docker compose logs -f api-gateway
 ```
 
