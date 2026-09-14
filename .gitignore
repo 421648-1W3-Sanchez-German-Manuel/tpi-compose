@@ -7,3 +7,7 @@ secrets/
 .env
 .env.*
 !.env.example
+
+# Override local de rutas de build (estructura de carpetas propia de esta
+# maquina, no la que espera el README)
+docker-compose.override.yml
