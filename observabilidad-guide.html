@@ -82,6 +82,38 @@
 <h1>Observabilidad</h1>
 <p class="subtitle">Prometheus + Grafana + Redis — Plataforma Gamificada TUP</p>
 
+<!-- ==================== SIDECAR ==================== -->
+<h2>Patrón Sidecar</h2>
+
+<div class="card info">
+  <div class="card-title">Qué es un sidecar</div>
+  <p>En arquitectura de microservicios, un sidecar es un contenedor auxiliar que se levanta junto al servicio principal y le provee funcionalidad transversal (logging, monitoreo, seguridad, etc.) sin meter ese código en la aplicación. Es como un "asistente" que vive al lado del micro y hace cosas que todos los micros necesitan pero que no son parte del negocio.</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Cómo lo usamos nosotros</div>
+  <p>Prometheus y Grafana son sidecars compartidos. No van dentro de cada microservicio — son contenedores separados que se levantan en el mismo compose y se comunican con los micros por la red interna de Docker:</p>
+  <ul>
+    <li><strong>Prometheus</strong> es un sidecar de monitoreo. Se levanta una vez y scrapeat a todos los micros. Cada micro solo necesita exponer <code>/actuator/prometheus</code> — no tiene que configurar nada de Prometheus adentro.</li>
+    <li><strong>Grafana</strong> es un sidecar de visualización. Se levanta una vez, se conecta a Prometheus, y muestra los datos de todos los micros en un solo dashboard.</li>
+  </ul>
+  <p style="margin-top: 0.5rem;">La alternativa sería meter un agente de Prometheus dentro de cada contenedor Java, pero eso duplica configuración, consumo de memoria, y complejidad. Con el sidecar, el micro solo expone un endpoint y el sidecar se encarga del resto.</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Topología de redes</div>
+  <p>Las redes de Docker definen quién puede hablar con quién:</p>
+  <pre><code>navegador ──► nginx :3000 ──► api-gateway ──► users / echo / los que vengan
+              [tpi-edge]      [tpi-platform]
+
+tpi-front     nginx + el front. No comparte red con el gateway.
+tpi-edge      nginx + api-gateway. Nada más entra acá.
+tpi-platform  gateway + eureka + kafka + los micros + prometheus + grafana.
+              ES LA RED COMPARTIDA: los otros equipos se enganchan acá.
+tpi-data      mysql + redis + quien tenga derecho a leerlos.</code></pre>
+  <p style="margin-top: 0.5rem;">Prometheus y Grafana están en <code>tpi-platform</code> para poder scrapear a los micros. Redis está en <code>tpi-data</code> porque es infraestructura de datos.</p>
+</div>
+
 <!-- ==================== REDIS ==================== -->
 <h2>Redis en nuestra implementación</h2>
 
@@ -222,6 +254,7 @@ http://localhost:9090/api/v1/targets  # JSON con estado de cada target</code></p
 <div class="card">
   <div class="card-title">Cómo funciona</div>
   <p>Prometheus usa Docker Service Discovery para conectarse al socket de Docker y descubrir contenedores. Cada job en <code>prometheus.yml</code> tiene un filtro <code>regex</code> que matchea un contenedor específico por nombre. Actualmente hay dos jobs: uno para <code>tpi-api-gateway</code> y otro para <code>tpi-users-service</code>.</p>
+  <p style="margin-top: 0.5rem; color: var(--muted); font-size: 0.85rem;">La convención <code>tpi-*</code> es la que elegimos nosotros. Podría ser cualquier otro prefijo (ej: <code>ms-*</code>, <code>svc-*</code>, o sin prefijo). Lo que importa es que el <code>regex</code> en <code>prometheus.yml</code> matchee el nombre del contenedor que vos elijas.</p>
   <table>
     <tr><th>Contenedor</th><th>Puerto</th><th>Métricas</th></tr>
     <tr>
