@@ -216,12 +216,12 @@ http://localhost:9090/api/v1/targets  # JSON con estado de cada target</code></p
   </div>
 </div>
 
-<!-- ==================== AUTO-DETECCION ==================== -->
-<h2>Auto-detección de micros</h2>
+<!-- ==================== SCRAPE DE MICROS ==================== -->
+<h2>Scrape de micros en Prometheus</h2>
 
 <div class="card">
   <div class="card-title">Cómo funciona</div>
-  <p>Prometheus usa Docker Service Discovery. Cada vez que un contenedor nuevo con nombre <code>tpi-*</code> levanta, Prometheus lo detecta y empieza a scrapearlo automáticamente. No hay que tocar <code>prometheus.yml</code>.</p>
+  <p>Prometheus usa Docker Service Discovery para conectarse al socket de Docker y descubrir contenedores. Cada job en <code>prometheus.yml</code> tiene un filtro <code>regex</code> que matchea un contenedor específico por nombre. Actualmente hay dos jobs: uno para <code>tpi-api-gateway</code> y otro para <code>tpi-users-service</code>.</p>
   <table>
     <tr><th>Contenedor</th><th>Puerto</th><th>Métricas</th></tr>
     <tr>
@@ -235,7 +235,49 @@ http://localhost:9090/api/v1/targets  # JSON con estado de cada target</code></p
       <td>HTTP, JVM, GC, CPU</td>
     </tr>
   </table>
-  <p style="margin-top: 0.5rem; color: var(--muted); font-size: 0.85rem;">Cada micro necesita tener <code>micrometer-registry-prometheus</code> en su <code>pom.xml</code> y el endpoint <code>/actuator/prometheus</code> abierto (sin auth).</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Qué hace cada label en <code>prometheus.yml</code></div>
+  <p>Cada job tiene esta estructura:</p>
+  <pre><code>- job_name: 'api-gateway'
+  docker_sd_configs:
+    - host: unix:///var/run/docker.sock
+  relabel_configs:
+    - source_labels: [__meta_docker_container_name]
+      regex: /tpi-api-gateway
+      action: keep
+    - target_label: __address__
+      replacement: tpi-api-gateway:8081
+    - target_label: __metrics_path__
+      replacement: /actuator/prometheus</code></pre>
+  <ul>
+    <li><code>docker_sd_configs → host: unix:///var/run/docker.sock</code>: le dice a Prometheus que se conecte al socket de Docker para descubrir contenedores.</li>
+    <li><code>source_labels: [__meta_docker_container_name]</code>: toma el nombre del contenedor (ej: <code>/tpi-api-gateway</code>).</li>
+    <li><code>regex: /tpi-api-gateway</code>: filtra solo el contenedor que matchee este nombre exacto. Los que no matcheen se descartan.</li>
+    <li><code>action: keep</code>: conserva solo los contenedores que pasaron el filtro anterior.</li>
+    <li><code>target_label: __address__</code>: sobrescribe la dirección donde Prometheus va a hacer el scrape. Sin esto, Prometheus intentaría scrapear en el puerto interno del contenedor.</li>
+    <li><code>replacement: tpi-api-gateway:8081</code>: la dirección final — nombre del contenedor y puerto donde está el actuator.</li>
+    <li><code>target_label: __metrics_path__</code>: el path del endpoint de métricas. Sin esto, Prometheus intentaría scrapear en <code>/metrics</code> por defecto.</li>
+    <li><code>replacement: /actuator/prometheus</code>: el path correcto de Spring Boot Actuator.</li>
+  </ul>
+</div>
+
+<div class="card warn">
+  <div class="card-title">Agregar un micro nuevo</div>
+  <p>Si mañana agregás un <code>tpi-games-service</code>, hay que tocar <code>monitoring/prometheus.yml</code> y agregar un nuevo job copiando la estructura de los existentes, cambiando el <code>job_name</code>, el <code>regex</code> y el <code>replacement</code> (puerto).</p>
+  <pre><code>- job_name: 'games-service'
+  docker_sd_configs:
+    - host: unix:///var/run/docker.sock
+  relabel_configs:
+    - source_labels: [__meta_docker_container_name]
+      regex: /tpi-games-service
+      action: keep
+    - target_label: __address__
+      replacement: tpi-games-service:8085
+    - target_label: __metrics_path__
+      replacement: /actuator/prometheus</code></pre>
+  <p style="margin-top: 0.5rem; color: var(--muted); font-size: 0.85rem;">Cada micro también necesita tener <code>/actuator/prometheus</code> abierto (sin auth) en su <code>SecurityConfig</code>.</p>
 </div>
 
 <!-- ==================== MEMORIA ==================== -->
@@ -300,7 +342,7 @@ docker compose down -v && docker compose up -d --build</code></pre>
     <li><strong>Redis + InterMicroTraceFilter</strong>: persiste traces de requests inter-micros para que el mailbox pueda mostrarlos en la UI</li>
     <li><strong>Prometheus</strong>: recolecta métricas de cada micro cada 15s vía <code>/actuator/prometheus</code></li>
     <li><strong>Grafana</strong>: visualiza las métricas con 8 paneles, auto-provisionado sin config manual</li>
-    <li><strong>Docker Service Discovery</strong>: Prometheus detecta nuevos micros automáticamente por nombre <code>tpi-*</code></li>
+    <li><strong>Docker Service Discovery</strong>: Prometheus se conecta al socket de Docker para descubrir contenedores</li>
     <li><strong>Seguridad</strong>: el endpoint <code>/actuator/prometheus</code> está abierto (no requiere auth) para que Prometheus pueda scrapearlo</li>
   </ul>
 </div>
