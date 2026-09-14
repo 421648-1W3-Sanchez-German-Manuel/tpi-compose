@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Observabilidad — Plataforma Gamificada TUP</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --orange: #d29922;
+    --purple: #bc8cff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    padding: 2rem;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.8rem; margin-bottom: 0.3rem; color: var(--accent); }
+  .subtitle { color: var(--muted); margin-bottom: 2rem; font-size: 0.9rem; }
+  h2 {
+    font-size: 1.2rem; color: var(--green);
+    margin-top: 2.5rem; margin-bottom: 0.8rem;
+    padding-bottom: 0.4rem; border-bottom: 1px solid var(--border);
+  }
+  p, li { font-size: 0.92rem; color: var(--text); }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 1rem 1.2rem; margin-bottom: 1rem;
+  }
+  .card-title { font-weight: 600; margin-bottom: 0.5rem; font-size: 0.95rem; }
+  ul { padding-left: 1.2rem; margin-bottom: 0.8rem; }
+  li { margin-bottom: 0.3rem; }
+  code {
+    font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+    background: #1c2128; padding: 0.15rem 0.4rem;
+    border-radius: 4px; font-size: 0.85rem; color: var(--purple);
+  }
+  pre {
+    background: #1c2128; border: 1px solid var(--border);
+    border-radius: 6px; padding: 0.8rem 1rem;
+    overflow-x: auto; margin: 0.8rem 0;
+    font-size: 0.85rem; line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; color: var(--text); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 640px) { .row { grid-template-columns: 1fr; } body { padding: 1rem; } }
+  .warn { border-left: 3px solid var(--orange); background: rgba(210, 153, 34, 0.08); }
+  .warn .card-title { color: var(--orange); }
+  .info { border-left: 3px solid var(--accent); background: rgba(88, 166, 255, 0.06); }
+  .ok { border-left: 3px solid var(--green); background: rgba(63, 185, 80, 0.06); }
+  .danger { border-left: 3px solid var(--red); background: rgba(248, 81, 73, 0.06); }
+  .danger .card-title { color: var(--red); }
+  .port-tag {
+    display: inline-block; background: #1c2128;
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 0.1rem 0.5rem; font-size: 0.8rem;
+    font-family: monospace; color: var(--muted); margin-left: 0.3rem;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 0.8rem 0; font-size: 0.88rem; }
+  th, td { padding: 0.5rem 0.8rem; border: 1px solid var(--border); text-align: left; }
+  th { background: #1c2128; color: var(--accent); font-weight: 600; }
+  .tag { display: inline-block; border-radius: 4px; padding: 0.1rem 0.5rem; font-size: 0.78rem; font-weight: 600; }
+  .tag-svc { background: rgba(88,166,255,0.15); color: var(--accent); }
+  .tag-port { background: rgba(188,140,255,0.15); color: var(--purple); }
+  .highlight { color: var(--accent); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>Observabilidad</h1>
+<p class="subtitle">Prometheus + Grafana + Redis — Plataforma Gamificada TUP</p>
+
+<!-- ==================== REDIS ==================== -->
+<h2>Redis en nuestra implementación</h2>
+
+<div class="card info">
+  <div class="card-title">Por qué usamos Redis</div>
+  <p>En una arquitectura de microservicios, cuando un request viaja de <code>api-gateway</code> a <code>users-service</code>, ese recorrido queda registrado en un <code>traceId</code> que genera Micrometer/OpenTelemetry. El problema es que ese traceId vive en la memoria del proceso Java y se pierde si nadie lo persiste. Nosotros necesitamos que el <code>dev-mailbox</code> (un servicio Node.js separado) pueda leer esos traces para mostrarlos en la UI de logs. Redis resuelve exactamente eso: es un canal intermedio donde el gateway escribe cada trace inter-micro, y el mailbox lo lee después.</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Qué es InterMicroTraceFilter</div>
+  <p>Es un filtro de Spring Cloud Gateway que se ejecuta en cada request que pasa por el gateway (order 75). Su trabajo es:</p>
+  <ol style="padding-left: 1.5rem; margin: 0.5rem 0;">
+    <li>Detectar si el request es <strong>interno</strong> (viene de otro micro, no del browser). Si es del browser, lo ignora.</li>
+    <li>Extraer el <code>traceId</code> del span activo de Micrometer (el ID que identifica esta request de forma única en toda la cadena de micros).</li>
+    <li>Extraer el <code>origen</code> del claim <code>type</code> del JWT — esto le dice quién hizo el request.</li>
+    <li>Armar un JSON con: <code>traceId</code>, <code>origen</code>, <code>destino</code> (el micro destino), <code>timestamp</code>, <code>path</code>, <code>method</code>, y otros campos.</li>
+    <li>Escribir ese JSON a Redis usando <code>LPUSH</code> (lo pone al inicio de la lista) y luego <code>LTRIM</code> para que la lista nunca tenga más de 200 entradas.</li>
+  </ol>
+</div>
+
+<div class="card">
+  <div class="card-title">Cómo funciona el flujo completo</div>
+  <p>El recurso en Redis se llama <code>intermicro:trace</code> y es una lista. Cada entry es un JSON con la traza de un request inter-micro. Así se ve el flujo:</p>
+  <pre><code>Request: users-service → api-gateway → users-service
+                                  ↓
+              InterMicroTraceFilter detecta el request interno
+                                  ↓
+              Arma el JSON con traceId, origen, destino, etc.
+                                  ↓
+              LPUSH intermicro:trace {JSON}    ← lo pone al inicio
+              LTRIM intermicro:trace 0 199     ← mantiene solo los últimos 200
+                                  ↓
+              dev-mailbox lee con LRANGE intermicro:trace 0 -1
+              y lo muestra en /dev/logs</code></pre>
+  <p style="margin-top:0.6rem;"><strong>¿Por qué solo los últimos 200?</strong> Para que Redis no crezca infinitamente. Si tuvieras 1000 micros haciendo 100 requests por segundo, la lista crecería sin control. El <code>LTRIM</code> garantiza que siempre haya como máximo 200 entradas, y las más viejas se descartan automáticamente.</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Verificar que Redis funciona correctamente</div>
+  <pre><code># Entrar al CLI de Redis
+docker exec -it tpi-redis redis-cli
+
+# Ver cuántas entradas hay en la lista (debería ser ≤200)
+LLEN intermicro:trace
+
+# Ver las últimas 5 entradas
+LRANGE intermicro:trace 0 4
+
+# Verificar que es una lista (no un string u otro tipo)
+TYPE intermicro:trace
+
+# Ver cuánta memoria usa Redis
+INFO memory</code></pre>
+  <p style="margin-top:0.5rem; color: var(--muted); font-size: 0.85rem;">Si <code>LLEN</code> devuelve 0, significa que no hubo requests inter-micros todavía o que el mailbox los consumió. Si devuelve 200, la lista está llena (como debe ser).</p>
+</div>
+
+<!-- ==================== PROMETHEUS ==================== -->
+<h2>Prometheus</h2>
+
+<div class="card info">
+  <div class="card-title">¿Qué es?</div>
+  <p>Prometheus es un servidor de métricas que funciona como un "recolector pasivo". No recibe eventos — en su lugar, cada 15 segundos hace un request HTTP a cada microservicio al endpoint <code>/actuator/prometheus</code>, que expone Spring Boot con la dependencia <code>micrometer-registry-prometheus</code>. Prometheus parsea esa respuesta y guarda las métricas en su propia base de datos optimizada para series de tiempo.</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Métrica clave: <code>http_server_requests_seconds_count</code></div>
+  <p>Esta métrica es la más importante para nosotros. Cada vez que llega un HTTP request a cualquier endpoint del micro, Spring Boot incrementa un contador con este nombre. Los <strong>labels</strong> (etiquetas) que trae son:</p>
+  <ul>
+    <li><code>method</code>: GET, POST, PUT, DELETE</li>
+    <li><code>uri</code>: el path del endpoint (ej: <code>/api/v1/users</code>)</li>
+    <li><code>status</code>: código HTTP de respuesta (200, 404, 500, etc.)</li>
+    <li><code>outcome</code>: SUCCESS, CLIENT_ERROR, SERVER_ERROR</li>
+  </ul>
+  <p style="margin-top: 0.5rem;">En Grafana usamos esta métrica para graficar: requests por segundo, distribución de códigos de respuesta, y tiempo promedio de respuesta.</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Cómo descubre micros (Docker Service Discovery)</div>
+  <p>En vez de listar manualmente cada microservicio en un archivo de configuración, Prometheus se conecta al socket de Docker y busca contenedores cuyo nombre empiece con <code>tpi-*</code>. Esto significa que si mañana agregás un <code>tpi-games-service</code> que exponga <code>/actuator/prometheus</code>, Prometheus lo detecta automáticamente sin tocar nada.</p>
+  <pre><code># prometheus.yml — la parte relevante
+scrape_configs:
+  - job_name: "docker"
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        filters:
+          - name: name
+            values: ["tpi-*"]</code></pre>
+</div>
+
+<div class="card">
+  <div class="card-title">Verificar métricas en Prometheus</div>
+  <pre><code>http://localhost:9090/targets      # ver que los targets estén UP
+http://localhost:9090/graph        # query manual de métricas
+http://localhost:9090/api/v1/targets  # JSON con estado de cada target</code></pre>
+</div>
+
+<!-- ==================== GRAFANA ==================== -->
+<h2>Grafana</h2>
+
+<div class="card info">
+  <div class="card-title">¿Qué es?</div>
+  <p>Grafana es una herramienta de visualización. Se conecta a Prometheus como "datasource" y te permite crear dashboards con gráficos. Nosotros ya creamos un dashboard con 8 paneles que muestra todo lo relevante de los microservicios Spring Boot.</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Conexión con Prometheus (auto-provisioned)</div>
+  <p>Cuando levantás <code>docker compose up</code>, Grafana carga automáticamente dos archivos que ya creamos:</p>
+  <ul>
+    <li><strong>Datasource</strong> → <code>monitoring/grafana/provisioning/datasources/prometheus.yml</code> le dice a Grafana que se conecte a <code>http://prometheus:9090</code></li>
+    <li><strong>Dashboard</strong> → <code>monitoring/grafana/dashboards/spring-boot.json</code> es el JSON con los 8 paneles</li>
+  </ul>
+  <p>No hace falta configurar nada a mano. Al abrir Grafana, el dashboard ya está ahí con datos.</p>
+</div>
+
+<div class="row">
+  <div class="card">
+    <div class="card-title">Acceso</div>
+    <p><span class="port-tag">:3001</span> en el host</p>
+    <p>Usuario: <code>admin</code></p>
+    <p>Contraseña: <code>Thiagojatuf11</code></p>
+  </div>
+  <div class="card">
+    <div class="card-title">Paneles del dashboard</div>
+    <ul>
+      <li>HTTP Requests/sec</li>
+      <li>Response Codes</li>
+      <li>Avg Response Time</li>
+      <li>Active Requests</li>
+      <li>JVM Memory / Threads</li>
+      <li>GC Pause / CPU</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ==================== AUTO-DETECCION ==================== -->
+<h2>Auto-detección de micros</h2>
+
+<div class="card">
+  <div class="card-title">Cómo funciona</div>
+  <p>Prometheus usa Docker Service Discovery. Cada vez que un contenedor nuevo con nombre <code>tpi-*</code> levanta, Prometheus lo detecta y empieza a scrapearlo automáticamente. No hay que tocar <code>prometheus.yml</code>.</p>
+  <table>
+    <tr><th>Contenedor</th><th>Puerto</th><th>Métricas</th></tr>
+    <tr>
+      <td><span class="tag tag-svc">tpi-api-gateway</span></td>
+      <td><span class="tag tag-port">8081</span></td>
+      <td>HTTP, JVM, GC, CPU</td>
+    </tr>
+    <tr>
+      <td><span class="tag tag-svc">tpi-users-service</span></td>
+      <td><span class="tag tag-port">8083</span></td>
+      <td>HTTP, JVM, GC, CPU</td>
+    </tr>
+  </table>
+  <p style="margin-top: 0.5rem; color: var(--muted); font-size: 0.85rem;">Cada micro necesita tener <code>micrometer-registry-prometheus</code> en su <code>pom.xml</code> y el endpoint <code>/actuator/prometheus</code> abierto (sin auth).</p>
+</div>
+
+<!-- ==================== MEMORIA ==================== -->
+<h2>Limitaciones de memoria</h2>
+
+<div class="card warn">
+  <div class="card-title">Grafana con 256M puede caer (OOMKilled)</div>
+  <p>Docker Desktop en Windows le asigna a cada contenedor un límite de memoria. Grafana está configurado con 256M, que puede no alcanzar si tenés muchos dashboards o si el build de otros contenedores consume mucha RAM al mismo tiempo. Cuando Grafana se queda sin memoria, Docker lo mata (OOMKilled) y el contenedor se reinicia.</p>
+  <p style="margin-top: 0.5rem;"><strong>Cómo saber si es OOMKilled:</strong></p>
+  <pre><code>docker inspect tpi-grafana --format='{{.State.OOMKilled}}'
+# true = se quedó sin memoria y Docker lo mató</code></pre>
+  <p style="margin-top: 0.5rem;"><strong>Solución 1:</strong> Subir el límite en <code>docker-compose.yml</code>:</p>
+  <pre><code>deploy:
+  resources:
+    limits:
+      memory: 512M   # era 256M</code></pre>
+  <p style="margin-top: 0.5rem;"><strong>Solución 2:</strong> Asignar más memoria general a Docker Desktop: Settings → Resources → Memory → 4GB o más.</p>
+</div>
+
+<div class="card info">
+  <div class="card-title">Prometheus también consume memoria</div>
+  <p>Prometheus no tiene límite hard configurado en este compose. Si el host se queda sin RAM, puede ser Prometheus o cualquier otro servicio. Para verificar cuánto consume cada uno:</p>
+  <pre><code>docker stats --no-stream tpi-prometheus tpi-grafana</code></pre>
+</div>
+
+<!-- ==================== COMANDOS ==================== -->
+<h2>Comandos útiles</h2>
+
+<div class="card">
+  <pre><code># Levantar todo
+docker compose up -d --build
+
+# Ver logs de cada servicio
+docker logs tpi-prometheus -f
+docker logs tpi-grafana -f
+docker logs tpi-api-gateway -f
+docker logs tpi-users-service -f
+
+# Verificar targets en Prometheus
+curl http://localhost:9090/api/v1/targets | python -m json.tool
+
+# Verificar datasource en Grafana
+curl -u admin:Thiagojatuf11 http://localhost:3001/api/datasources
+
+# Verificar dashboard en Grafana
+curl -u admin:Thiagojatuf11 http://localhost:3001/api/dashboards/uid/2085fc68-8a63-4b3e-b023-f5ef68c64e15
+
+# Redis — ver trazas inter-micros
+docker exec tpi-redis redis-cli LLEN intermicro:trace
+docker exec tpi-redis redis-cli LRANGE intermicro:trace 0 4
+
+# Reset completo (volver a provisionar todo desde cero)
+docker compose down -v && docker compose up -d --build</code></pre>
+</div>
+
+<!-- ==================== RESUMEN ==================== -->
+<h2>Resumen</h2>
+
+<div class="card ok">
+  <div class="card-title">Qué implementamos</div>
+  <ul>
+    <li><strong>Redis + InterMicroTraceFilter</strong>: persiste traces de requests inter-micros para que el mailbox pueda mostrarlos en la UI</li>
+    <li><strong>Prometheus</strong>: recolecta métricas de cada micro cada 15s vía <code>/actuator/prometheus</code></li>
+    <li><strong>Grafana</strong>: visualiza las métricas con 8 paneles, auto-provisionado sin config manual</li>
+    <li><strong>Docker Service Discovery</strong>: Prometheus detecta nuevos micros automáticamente por nombre <code>tpi-*</code></li>
+    <li><strong>Seguridad</strong>: el endpoint <code>/actuator/prometheus</code> está abierto (no requiere auth) para que Prometheus pueda scrapearlo</li>
+  </ul>
+</div>
+
+</body>
+</html>

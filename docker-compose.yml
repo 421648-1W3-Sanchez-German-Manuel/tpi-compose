@@ -258,6 +258,10 @@ services:
       context: ../users
       dockerfile: ../tpi-compose/users.Dockerfile
     container_name: tpi-users-service
+    labels:
+      prometheus.scrape: "true"
+      prometheus.port: "8083"
+      prometheus.path: "/actuator/prometheus"
     # SIN "ports:" A PROPOSITO (U11 / manifiesto §06, DEC-08).
     # Es lo que hace confiables los headers X-*: nadie puede saltearse el
     # Gateway. Con 8082 publicado, un DELETE /api/users/{id} con
@@ -301,6 +305,10 @@ services:
       context: ../api-gateway
       dockerfile: Dockerfile
     container_name: tpi-api-gateway
+    labels:
+      prometheus.scrape: "true"
+      prometheus.port: "8081"
+      prometheus.path: "/actuator/prometheus"
     # YA NO PUBLICA PUERTO. La puerta es nginx:3000. El gateway vive en
     # tpi-edge, donde el unico que lo alcanza es nginx.
     expose: ["8080","8081"]                   # 8081 = management, red interna
@@ -348,10 +356,10 @@ services:
   echo-service:
     # Dev: se construye desde el repo hermano pero taguea el nombre de GHCR,
     # para no correr un binario viejo y mantener la imagen al dia con el build.
+    #build:
+    #  context: ../echo-service
+    #  dockerfile: Dockerfile
     image: ghcr.io/412061-ibazeta/echo-service:latest
-    build:
-      context: ../echo-service
-      dockerfile: Dockerfile
     container_name: tpi-echo-service
     expose: ["8084","8085"]
     environment:
@@ -372,6 +380,43 @@ services:
       resources:
         limits:
           memory: 512M
+
+  # ---------------------------------------------------------------------------
+  # Observabilidad
+  # ---------------------------------------------------------------------------
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: tpi-prometheus
+    user: root
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports: ["9090:9090"]
+    networks: [tpi-platform]
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: tpi-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    ports: ["3001:3000"]
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks: [tpi-platform]
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
 # ---------------------------------------------------------------------------
 # Redes
@@ -408,3 +453,4 @@ volumes:
   mysql-data:
   redis-data:
   kafka-data:
+  grafana-data:
