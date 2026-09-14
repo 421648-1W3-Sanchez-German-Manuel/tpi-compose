@@ -275,6 +275,12 @@ services:
       JWT_PUBLIC_KEYS_DIR: /run/secrets/jwks
       JWT_ACTIVE_KID: ${JWT_ACTIVE_KID:-dev}
       USERS_FRONT_URL: ${USERS_FRONT_URL:-http://localhost:3000}
+      # false ACA A PROPOSITO: este compose no termina TLS en ningun lado
+      # (nginx escucha :3000 en HTTP plano). Con Secure=true el navegador
+      # nunca manda las cookies de sesion y nadie puede loguearse. El
+      # default de la app (application.yml) sigue en true — cualquier
+      # despliegue con TLS real no toca esta variable.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@frc.utn.edu.ar}
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
     volumes:
