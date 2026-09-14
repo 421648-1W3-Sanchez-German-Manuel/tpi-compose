@@ -356,9 +356,9 @@ services:
   echo-service:
     # Dev: se construye desde el repo hermano pero taguea el nombre de GHCR,
     # para no correr un binario viejo y mantener la imagen al dia con el build.
-    #build:
-    #  context: ../echo-service
-    #  dockerfile: Dockerfile
+    build:
+      context: ../echo-service
+      dockerfile: Dockerfile
     image: ghcr.io/412061-ibazeta/echo-service:latest
     container_name: tpi-echo-service
     expose: ["8084","8085"]
