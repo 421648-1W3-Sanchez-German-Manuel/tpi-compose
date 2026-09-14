@@ -233,7 +233,7 @@ http://localhost:9090/api/v1/targets  # JSON con estado de cada target</code></p
     <div class="card-title">Acceso</div>
     <p><span class="port-tag">:3001</span> en el host</p>
     <p>Usuario: <code>admin</code></p>
-    <p>Contraseña: <code>Thiagojatuf11</code></p>
+    <p>Contraseña: <code>admin</code></p>
   </div>
   <div class="card">
     <div class="card-title">Paneles del dashboard</div>
@@ -353,10 +353,10 @@ docker logs tpi-users-service -f
 curl http://localhost:9090/api/v1/targets | python -m json.tool
 
 # Verificar datasource en Grafana
-curl -u admin:Thiagojatuf11 http://localhost:3001/api/datasources
+curl -u admin:admin http://localhost:3001/api/datasources
 
 # Verificar dashboard en Grafana
-curl -u admin:Thiagojatuf11 http://localhost:3001/api/dashboards/uid/2085fc68-8a63-4b3e-b023-f5ef68c64e15
+curl -u admin:admin http://localhost:3001/api/dashboards/uid/2085fc68-8a63-4b3e-b023-f5ef68c64e15
 
 # Redis — ver trazas inter-micros
 docker exec tpi-redis redis-cli LLEN intermicro:trace
