@@ -38,7 +38,7 @@ services:
   # ningun lado, y el gateway deja de publicar puerto.
   nginx:
     image: nginx:1.27-alpine
-    container_name: tpi-nginx
+    container_name: nginx
     ports: ["3000:3000"]
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
@@ -73,7 +73,7 @@ services:
     build:
       context: ../frontend-users
       dockerfile: Dockerfile
-    container_name: tpi-webapp
+    container_name: webapp
     # SIN ports: se llega por el 3000 del proxy, como todo lo demas.
     expose: ["4200"]
     healthcheck:
@@ -111,7 +111,7 @@ services:
     build:
       context: ./dev-mailbox
       dockerfile: Dockerfile
-    container_name: tpi-dev-mailbox
+    container_name: dev-mailbox
     expose: ["4300"]
     environment:
       DB_HOST: mysql
@@ -153,7 +153,7 @@ services:
   # (hace falta la allowlist, ver GATEWAY_ALLOWLIST mas abajo).
   eureka:
     image: steeltoeoss/eureka-server:latest
-    container_name: tpi-eureka
+    container_name: eureka
     ports: ["8761:8761"]
     healthcheck:
       # La imagen trae wget y sh, no curl ni bash.
@@ -170,7 +170,7 @@ services:
 
   mysql:
     image: mysql:8.4                          # DEC-20 · LTS
-    container_name: tpi-mysql
+    container_name: mysql
     environment:
       MYSQL_DATABASE: users
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?falta MYSQL_ROOT_PASSWORD en .env}
@@ -194,7 +194,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: tpi-redis
+    container_name: redis
     # Persistencia: session:{userId} no tiene TTL, Redis aca es el registro de
     # sesiones y no un cache. Sin AOF, un reinicio desloguea a todo el mundo.
     command: ["redis-server","--appendonly","yes"]
@@ -217,7 +217,7 @@ services:
   # Va en tpi-platform porque los otros equipos tambien publican y consumen.
   kafka:
     image: apache/kafka:3.8.0                 # KRaft, sin Zookeeper
-    container_name: tpi-kafka
+    container_name: kafka
     environment:
       KAFKA_HEAP_OPTS: "-Xmx512m -Xms256m"
       KAFKA_NODE_ID: 1
@@ -257,7 +257,7 @@ services:
     build:
       context: ../users
       dockerfile: ../tpi-compose/users.Dockerfile
-    container_name: tpi-users-service
+    container_name: users-service
     labels:
       prometheus.scrape: "true"
       prometheus.port: "8083"
@@ -304,7 +304,7 @@ services:
     build:
       context: ../api-gateway
       dockerfile: Dockerfile
-    container_name: tpi-api-gateway
+    container_name: api-gateway
     labels:
       prometheus.scrape: "true"
       prometheus.port: "8081"
@@ -360,7 +360,7 @@ services:
       context: ../echo-service
       dockerfile: Dockerfile
     image: ghcr.io/412061-ibazeta/echo-service:latest
-    container_name: tpi-echo-service
+    container_name: echo-service
     expose: ["8084","8085"]
     environment:
       GATEWAY_URL: http://api-gateway:8080
@@ -387,7 +387,7 @@ services:
 
   prometheus:
     image: prom/prometheus:latest
-    container_name: tpi-prometheus
+    container_name: prometheus
     user: root
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
@@ -401,7 +401,7 @@ services:
 
   grafana:
     image: grafana/grafana:latest
-    container_name: tpi-grafana
+    container_name: grafana
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
