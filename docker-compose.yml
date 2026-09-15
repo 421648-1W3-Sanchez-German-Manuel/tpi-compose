@@ -119,7 +119,7 @@ services:
       DB_USER: root
       DB_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       KAFKA_BROKERS: kafka:9092
-      TOPIC_COURSE_VALIDATION: ${TOPIC_COURSE_VALIDATION:-tema-02-cursos.validacion-resuelta.v1}
+      TOPIC_COURSE_VALIDATION: ${TOPIC_COURSE_VALIDATION:-course-events}
       # De donde lee la pestana Logs: la traza que deja el Gateway en Redis.
       REDIS_HOST: redis
       REDIS_PORT: "6379"

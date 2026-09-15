@@ -23,7 +23,7 @@ import Redis from 'ioredis';
 const PORT = Number(process.env.PORT ?? 4300);
 const LIMITE_MAX = 50;
 const LIMITE_LOGS_MAX = 200;
-const TOPIC_PADRON = process.env.TOPIC_COURSE_VALIDATION ?? 'tema-02-cursos.validacion-resuelta.v1';
+const TOPIC_PADRON = process.env.TOPIC_COURSE_VALIDATION ?? 'course-events';
 
 // La lista de traza que escribe el Gateway (InterMicroTraceFilter) con una
 // entrada por llamada enrutada a un micro: origen (persona/servicio), destino,
@@ -158,10 +158,11 @@ async function resolverPadron(email, resultado) {
   // en silencio, por eso cada pedido genera uno nuevo.
   await publicar({
     eventId: randomUUID(),
-    eventType: 'VALIDACION_RESUELTA',
+    eventType: 'COURSE-VALIDATION-RESOLVED',
+    eventVersion: 1,
     producer: 'tema-02-cursos',
     timestamp: new Date().toISOString(),
-    payload: { userId: u.id, resultado: resultado ?? 'APROBADO', cursoId: 'prog4-2026' },
+    payload: { userId: u.id, result: resultado ?? 'APROBADO', courseId: 'prog4-2026' },
   });
 
   // El consumo es asincronico: contestar sin mirar seria mentirle al que apreto.
