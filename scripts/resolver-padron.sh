@@ -6,9 +6,9 @@
 #
 # Un alumno que activa su email NO queda habilitado: pasa a PENDING_COURSE y
 # espera a que Cursos valide su padron. Esa validacion llega por Kafka, en el
-# topico tema-02-cursos.validacion-resuelta.v1, y no hay ningun endpoint HTTP
-# que la dispare — es asincronica a proposito (DEC-09). Mientras tanto la
-# persona solo puede hablar con /api/users/**.
+# topico course-events, y no hay ningun endpoint HTTP que la dispare — es
+# asincronica a proposito (DEC-09). Mientras tanto la persona solo puede
+# hablar con /api/users/**.
 #
 # Este script se hace pasar por Cursos. Es una herramienta de DESARROLLO: en la
 # plataforma real el evento lo manda el otro equipo y nosotros solo lo
@@ -66,7 +66,7 @@ AHORA="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 # El listener es idempotente por eventId (DEC-13): un eventId repetido se
 # descarta en silencio, por eso cada corrida genera uno nuevo.
-EVENTO="{\"eventId\":\"${EVENT_ID}\",\"eventType\":\"VALIDACION_RESUELTA\",\"producer\":\"tema-02-cursos\",\"timestamp\":\"${AHORA}\",\"payload\":{\"userId\":\"${USER_ID}\",\"resultado\":\"${RESULTADO}\",\"cursoId\":\"prog4-2026\"}}"
+EVENTO="{\"eventId\":\"${EVENT_ID}\",\"eventType\":\"COURSE-VALIDATION-RESOLVED\",\"eventVersion\":1,\"producer\":\"tema-02-cursos\",\"timestamp\":\"${AHORA}\",\"payload\":{\"userId\":\"${USER_ID}\",\"result\":\"${RESULTADO}\",\"courseId\":\"prog4-2026\"}}"
 
 # MSYS_NO_PATHCONV: en Git Bash sobre Windows, /opt/... se reescribe a una ruta
 # de Windows antes de llegar al contenedor y el exec falla diciendo que no
@@ -74,7 +74,7 @@ EVENTO="{\"eventId\":\"${EVENT_ID}\",\"eventType\":\"VALIDACION_RESUELTA\",\"pro
 echo "$EVENTO" | MSYS_NO_PATHCONV=1 docker compose exec -T kafka \
   //opt/kafka/bin/kafka-console-producer.sh \
   --bootstrap-server localhost:9092 \
-  --topic "${TOPIC_COURSE_VALIDATION:-tema-02-cursos.validacion-resuelta.v1}" 2>/dev/null
+  --topic "${TOPIC_COURSE_VALIDATION:-course-events}" 2>/dev/null
 
 # El consumo es asincronico: dar por bueno sin mirar seria mentir.
 for _ in 1 2 3 4 5 6 7 8 9 10; do

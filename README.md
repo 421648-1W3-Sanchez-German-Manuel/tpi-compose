@@ -117,7 +117,7 @@ no hay ninguna variable que acordarse de poner en `false`.
 
 También trae un botón **"resolver padrón"** por cada cuenta trabada en
 `PENDING_COURSE`. Publica en Kafka el evento que en la plataforma real manda
-Cursos (`tema-02-cursos.validacion-resuelta.v1`), en vez de tocar la base: así
+Cursos (`course-events`), en vez de tocar la base: así
 ejercita el listener, la idempotencia por `eventId` y el mail de padrón
 resuelto. Un `UPDATE` directo daría el mismo estado final sin probar nada de
 eso. Lo mismo desde la terminal: `./scripts/resolver-padron.sh <email>`.
@@ -277,10 +277,12 @@ scopes es cerrado (hoy solo `users.profile.read`) y sumar uno es un cambio en
 | `eureka` | registro de la plataforma | imagen de terceros, **provisoria** hasta que exista el servidor propio |
 | `kafka` | de la plataforma, infraestructura compartida | broker local de desarrollo, en `tpi-platform` |
 
-Los topics `tema-01-users.*` son propios. Los otros dos pertenecen a otros
-equipos: `tema-02-cursos.validacion-resuelta.v1` se consume, y
-`tema-XX-notificaciones.email.v1` se produce para Notificaciones — ese `XX` es
-literal, el contrato todavía no está cerrado.
+Los topics de dominio son propios o de contrato: `user-events` se produce,
+`course-events` se consume (Cursos), y `notification-events` se produce para
+Notificaciones. Los nombres viejos (`tema-01-users.*`,
+`tema-02-cursos.validacion-resuelta.v1`, `tema-XX-notificaciones.email.v1`)
+quedan como referencia histórica; el contrato con esos equipos todavía puede
+ajustarse.
 
 > ⚠️ El Kafka local tiene `KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"`, por eso
 > funciona sin que nadie cree nada. En el broker compartido eso suele estar
