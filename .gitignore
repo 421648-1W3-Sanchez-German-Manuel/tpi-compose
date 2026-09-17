@@ -1,13 +1,13 @@
-# DEC-18: las claves RS256 no entran ni a la imagen ni al repo
+# DEC-18: the RS256 keys do not enter the image or the repo
 secrets/
 
-# `.env` a secas NO alcanza: un `.env.bak` de un backup, un `.env.local` o un
-# `.env.old` tienen los mismos secretos y entran igual. El glob los cubre a
-# todos; la excepcion explicita es el ejemplo, que no tiene ningun valor real.
+# `.env` alone is NOT enough: a `.env.bak` from a backup, a `.env.local` or a
+# `.env.old` carry the same secrets and get in all the same. The glob covers
+# them all; the explicit exception is the example, which has no real value.
 .env
 .env.*
 !.env.example
 
-# Override local de rutas de build (estructura de carpetas propia de esta
-# maquina, no la que espera el README)
+# Local override of build paths (this machine's own folder structure, not the
+# one the README expects)
 docker-compose.override.yml

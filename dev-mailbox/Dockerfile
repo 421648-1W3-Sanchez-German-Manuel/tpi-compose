@@ -1,11 +1,11 @@
-# Buzon de desarrollo. Dependencias ligeras (driver de MySQL, ioredis para la
-# traza del Gateway, kafkajs para resolver padrones) y un archivo.
+# Development mailbox. Light dependencies (MySQL driver, ioredis for the
+# Gateway trace, kafkajs to resolve padrons) and a single file.
 FROM node:22-alpine
 WORKDIR /app
 
 COPY package.json ./
-# Sin package-lock: es una herramienta de desarrollo de un archivo, y un lock
-# mas para mantener no compra nada. `npm ci` aca no aplica.
+# No package-lock: it is a one-file development tool, and one more lock to
+# maintain buys nothing. `npm ci` does not apply here.
 RUN npm install --omit=dev --no-audit --no-fund
 
 COPY server.js ./

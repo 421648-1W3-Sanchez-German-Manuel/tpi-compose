@@ -1,41 +1,42 @@
-# Plataforma Gamificada TUP · Tema 01 — stack local
+# TUP Gamified Platform · Theme 01 — local stack
 #
-# Materializa DEC-40 (SPEC-api-gateway.md §16.2). El nombre del proyecto es
-# `tpi-compose` para que se distinga del resto en Docker Desktop.
+# Implements DEC-40 (SPEC-api-gateway.md §16.2). The project name is
+# `tpi-compose` so it stands out from the rest in Docker Desktop.
 #
 #   docker compose up -d --build
 #   docker compose logs -f api-gateway
-#   docker compose down          (agrega -v para borrar tambien los datos)
+#   docker compose down          (add -v to also delete the data)
 #
 # ---------------------------------------------------------------------------
-# TOPOLOGIA DE REDES — lo primero que hay que entender de este archivo
+# NETWORK TOPOLOGY — the first thing to understand about this file
 # ---------------------------------------------------------------------------
 #
-#   navegador ──► nginx :3000 ──► api-gateway ──► users / echo / los que vengan
+#   browser ──► nginx :3000 ──► api-gateway ──► users / echo / whatever comes
 #                 [tpi-edge]      [tpi-platform]
 #
-#   tpi-front     nginx + el front. El front NO comparte red con el gateway,
-#                 asi que no hay forma de pegarle directo ni por error.
-#   tpi-edge      nginx + api-gateway. Nada mas entra aca.
-#   tpi-platform  gateway + eureka + kafka + los micros. ES LA RED COMPARTIDA:
-#                 los otros equipos se enganchan a esta y a ninguna otra.
-#   tpi-data      mysql + redis + quien tenga derecho a leerlos. Fuera de la
-#                 red compartida a proposito: un micro de otro equipo se
-#                 registra en Eureka, no le hablan a nuestra base.
+#   tpi-front     nginx + the front. The front does NOT share a network with
+#                 the gateway, so there is no way to hit it directly, not
+#                 even by mistake.
+#   tpi-edge      nginx + api-gateway. Nothing else gets in here.
+#   tpi-platform  gateway + eureka + kafka + the micros. THIS IS THE SHARED
+#                 NETWORK: the other teams hook into this one and none other.
+#   tpi-data      mysql + redis + whoever has the right to read them. Outside
+#                 the shared network on purpose: a micro from another team
+#                 registers in Eureka, it does not talk to our database.
 #
-# El UNICO puerto publicado del stack es el 3000 de nginx (mas el 8761 de
-# Eureka, que es el registro y tiene que ser alcanzable — ver ahi).
+# The ONLY published port of the stack is nginx's 3000 (plus Eureka's 8761,
+# which is the registry and has to be reachable — see there).
 name: tpi-compose
 
 services:
 
   # ---------------------------------------------------------------------------
-  # Borde
+  # Edge
   # ---------------------------------------------------------------------------
 
-  # La puerta. Ver nginx/nginx.conf para el por que; en dos lineas: el navegador
-  # habla con un solo origen, asi no hay preflight y no hace falta CORS en
-  # ningun lado, y el gateway deja de publicar puerto.
+  # The door. See nginx/nginx.conf for the why; in two lines: the browser
+  # talks to a single origin, so there is no preflight and no CORS anywhere,
+  # and the gateway stops publishing a port.
   nginx:
     image: nginx:1.27-alpine
     container_name: nginx
@@ -44,10 +45,11 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx/proxy-comun.inc:/etc/nginx/conf.d/proxy-comun.inc:ro
     healthcheck:
-      # 127.0.0.1 y NO localhost: nginx escucha en 0.0.0.0:3000 (solo IPv4) y
-      # dentro del contenedor localhost resuelve tambien a ::1, que es lo que
-      # el wget de busybox intenta primero. Con `localhost` la sonda da
-      # "connection refused" y el contenedor queda unhealthy sirviendo perfecto.
+      # 127.0.0.1 and NOT localhost: nginx listens on 0.0.0.0:3000 (IPv4 only)
+      # and inside the container localhost also resolves to ::1, which is what
+      # busybox's wget tries first. With `localhost` the probe gets
+      # "connection refused" and the container stays unhealthy while serving
+      # perfectly fine.
       test: ["CMD-SHELL","wget -qO- --timeout=3 http://127.0.0.1:3000/healthz >/dev/null 2>&1 || exit 1"]
       interval: 15s
       timeout: 5s
@@ -62,23 +64,23 @@ services:
         limits:
           memory: 64M
 
-  # La SPA de Angular, servida como estaticos por su propio nginx.
+  # The Angular SPA, served as static files by its own nginx.
   #
-  # Vive SOLO en tpi-front. No tiene membresia en tpi-edge ni en tpi-platform,
-  # asi que desde este contenedor no hay ruta al gateway ni a los micros: todo
-  # lo que el navegador pide a /api lo reenvia el proxy del borde. Esa es la
-  # mitad estructural de "el front no le pega directo al gateway"; la otra
-  # mitad es que el navegador solo conoce el :3000.
+  # Lives ONLY in tpi-front. It has no membership in tpi-edge or tpi-platform,
+  # so from this container there is no route to the gateway or the micros:
+  # everything the browser asks of /api is forwarded by the edge proxy. That
+  # is the structural half of "the front does not hit the gateway directly";
+  # the other half is that the browser only knows :3000.
   webapp:
     build:
       context: ../frontend-users
       dockerfile: Dockerfile
     container_name: webapp
-    # SIN ports: se llega por el 3000 del proxy, como todo lo demas.
+    # NO ports: it is reached through the proxy's :3000, like everything else.
     expose: ["4200"]
     healthcheck:
-      # 127.0.0.1 y no localhost: nginx escucha solo en IPv4 y el wget de
-      # busybox intenta ::1 primero (ver la sonda del proxy, mismo caso).
+      # 127.0.0.1 and not localhost: nginx listens on IPv4 only and busybox's
+      # wget tries ::1 first (see the proxy probe, same case).
       test: ["CMD-SHELL","wget -qO- --timeout=3 http://127.0.0.1:4200/healthz >/dev/null 2>&1 || exit 1"]
       interval: 15s
       timeout: 5s
@@ -90,23 +92,23 @@ services:
         limits:
           memory: 64M
 
-  # Buzon de desarrollo: muestra los codigos de 2FA y los enlaces de activacion
-  # y de reset que quedan en outbox_events, porque no hay servidor de mail.
+  # Development mailbox: shows the 2FA codes and the activation and reset
+  # links that remain in outbox_events, because there is no mail server.
   #
-  # ⛔ SOLO DESARROLLO. Lista tokens de activacion de CUALQUIER cuenta, o sea
-  # que publicarlo es regalar todas las cuentas. Esta como servicio aparte y no
-  # como endpoint de users-service a proposito: asi este codigo no existe dentro
-  # de ninguna imagen desplegable, y apagarlo es borrar este bloque — no hay que
-  # acordarse de ninguna variable de entorno.
+  # ⛔ DEVELOPMENT ONLY. It lists activation tokens of ANY account, which
+  # means publishing it gives away every account. It sits as a separate
+  # service and not as an endpoint of users-service on purpose: this way this
+  # code does not exist inside any deployable image, and turning it off is
+  # deleting this block — no environment variable to remember.
   #
-  # Redes: tpi-front (lo consume el navegador via nginx), tpi-data (lee MySQL)
-  # y tpi-platform (publica en Kafka el evento de padron resuelto, haciendose
-  # pasar por Cursos). Esa ultima es la que lo habilita a destrabar una cuenta
-  # en PENDING_COURSE, que es asincronica y no tiene endpoint HTTP que la
-  # dispare.
+  # Networks: tpi-front (the browser consumes it via nginx), tpi-data (reads
+  # MySQL) and tpi-platform (publishes the resolved-padron event to Kafka,
+  # posing as Courses). That last one is what lets it unblock an account in
+  # PENDING_COURSE, which is asynchronous and has no HTTP endpoint that
+  # triggers it.
   dev-mailbox:
-    # Dev: se construye local pero taguea el nombre de GHCR, asi el build y la
-    # imagen publicada son la misma cosa (ver README "republicar").
+    # Dev: built locally but tagged with the GHCR name, so the build and the
+    # published image are the same thing (see README: republish).
     image: ghcr.io/412061-ibazeta/dev-mailbox:latest
     build:
       context: ./dev-mailbox
@@ -120,7 +122,7 @@ services:
       DB_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       KAFKA_BROKERS: kafka:9092
       TOPIC_COURSE_VALIDATION: ${TOPIC_COURSE_VALIDATION:-course-events}
-      # De donde lee la pestana Logs: la traza que deja el Gateway en Redis.
+      # Where the Logs tab reads from: the trace the Gateway leaves in Redis.
       REDIS_HOST: redis
       REDIS_PORT: "6379"
     depends_on:
@@ -140,23 +142,23 @@ services:
           memory: 128M
 
   # ---------------------------------------------------------------------------
-  # Infraestructura
+  # Infrastructure
   # ---------------------------------------------------------------------------
 
-  # El registro. Imagen de terceros, provisoria hasta que exista el servidor
-  # propio; ahi esto pasa a ser `build: ../eureka-server`.
+  # The registry. Third-party image, provisional until the own server exists;
+  # then this becomes `build: ../eureka-server`.
   #
-  # Publica 8761 A PROPOSITO, y es la unica excepcion a "un solo puerto":
-  # un equipo que corre su micro desde el IDE necesita una direccion a la cual
-  # registrarse. Publicar el registro no expone nada — Eureka solo dice quien
-  # esta vivo, y estar registrado NO alcanza para que el gateway te rutee
-  # (hace falta la allowlist, ver GATEWAY_ALLOWLIST mas abajo).
+  # Publishes 8761 ON PURPOSE, and it is the only exception to "a single
+  # port": a team running its micro from the IDE needs an address to register
+  # against. Publishing the registry exposes nothing — Eureka only says who
+  # is alive, and being registered is NOT enough for the gateway to route you
+  # (the allowlist is required, see GATEWAY_ALLOWLIST below).
   eureka:
     image: steeltoeoss/eureka-server:latest
     container_name: eureka
     ports: ["8761:8761"]
     healthcheck:
-      # La imagen trae wget y sh, no curl ni bash.
+      # The image ships wget and sh, not curl or bash.
       test: ["CMD-SHELL","wget -qO- --timeout=3 http://localhost:8761/actuator/health | grep -q UP"]
       interval: 10s
       timeout: 5s
@@ -173,7 +175,7 @@ services:
     container_name: mysql
     environment:
       MYSQL_DATABASE: users
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?falta MYSQL_ROOT_PASSWORD en .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?missing MYSQL_ROOT_PASSWORD in .env}
     command: >
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_0900_ai_ci
@@ -195,8 +197,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: redis
-    # Persistencia: session:{userId} no tiene TTL, Redis aca es el registro de
-    # sesiones y no un cache. Sin AOF, un reinicio desloguea a todo el mundo.
+    # Persistence: session:{userId} has no TTL, here Redis is the session
+    # registry and not a cache. Without AOF, a restart logs everyone out.
     command: ["redis-server","--appendonly","yes"]
     expose: ["6379"]
     volumes: [redis-data:/data]
@@ -211,12 +213,13 @@ services:
         limits:
           memory: 256M
 
-  # Kafka no es del Tema 01: el broker es infra compartida de la plataforma y
-  # los topics son un contrato con el equipo que los posee (AGENTS.md). Este es
-  # un broker local de desarrollo. Ojo con auto-create al enchufar el real.
-  # Va en tpi-platform porque los otros equipos tambien publican y consumen.
+  # Kafka is not part of Theme 01: the broker is shared platform
+  # infrastructure and the topics are a contract with the team that owns them
+  # (AGENTS.md). This is a local dev broker. Beware of auto-create when the
+  # real one is plugged in. It lives in tpi-platform because the other teams
+  # also publish and consume.
   kafka:
-    image: apache/kafka:3.8.0                 # KRaft, sin Zookeeper
+    image: apache/kafka:3.8.0                 # KRaft, no Zookeeper
     container_name: kafka
     environment:
       KAFKA_HEAP_OPTS: "-Xmx512m -Xms256m"
@@ -228,7 +231,8 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      # Un solo broker: todo replication factor 1 o los topics internos no arrancan.
+      # Single broker: everything at replication factor 1 or the internal
+      # topics will not start.
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
@@ -250,7 +254,7 @@ services:
           memory: 1G
 
   # ---------------------------------------------------------------------------
-  # Microservicios
+  # Microservices
   # ---------------------------------------------------------------------------
 
   users-service:
@@ -262,10 +266,10 @@ services:
       prometheus.scrape: "true"
       prometheus.port: "8083"
       prometheus.path: "/actuator/prometheus"
-    # SIN "ports:" A PROPOSITO (U11 / manifiesto §06, DEC-08).
-    # Es lo que hace confiables los headers X-*: nadie puede saltearse el
-    # Gateway. Con 8082 publicado, un DELETE /api/users/{id} con
-    # "X-User-Roles: ADMIN" inventado entra sin password, sin token y sin 2FA.
+    # NO "ports:" ON PURPOSE (U11 / manifest §06, DEC-08).
+    # It is what makes the X-* headers trustworthy: nobody can bypass the
+    # Gateway. With 8082 published, a DELETE /api/users/{id} with an invented
+    # "X-User-Roles: ADMIN" gets in without password, token or 2FA.
     expose: ["8082","8083"]                   # DEC-28
     environment:
       SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/users?connectionTimeZone=UTC&preserveInstants=true"
@@ -279,16 +283,16 @@ services:
       JWT_PUBLIC_KEYS_DIR: /run/secrets/jwks
       JWT_ACTIVE_KID: ${JWT_ACTIVE_KID:-dev}
       USERS_FRONT_URL: ${USERS_FRONT_URL:-http://localhost:3000}
-      # false ACA A PROPOSITO: este compose no termina TLS en ningun lado
-      # (nginx escucha :3000 en HTTP plano). Con Secure=true el navegador
-      # nunca manda las cookies de sesion y nadie puede loguearse. El
-      # default de la app (application.yml) sigue en true — cualquier
-      # despliegue con TLS real no toca esta variable.
+      # false HERE ON PURPOSE: this compose does not terminate TLS anywhere
+      # (nginx listens on :3000 in plain HTTP). With Secure=true the browser
+      # never sends the session cookies and nobody can log in. The app default
+      # (application.yml) stays true — any deployment with real TLS does not
+      # touch this variable.
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@frc.utn.edu.ar}
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
     volumes:
-      - ./secrets:/run/secrets:ro             # gitignoreado. NUNCA en el repo
+      - ./secrets:/run/secrets:ro             # gitignored. NEVER in the repo
     depends_on:
       mysql: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -315,30 +319,31 @@ services:
       prometheus.scrape: "true"
       prometheus.port: "8081"
       prometheus.path: "/actuator/prometheus"
-    # YA NO PUBLICA PUERTO. La puerta es nginx:3000. El gateway vive en
-    # tpi-edge, donde el unico que lo alcanza es nginx.
-    expose: ["8080","8081"]                   # 8081 = management, red interna
+    # NO LONGER PUBLISHES A PORT. The door is nginx:3000. The gateway lives in
+    # tpi-edge, where the only one that reaches it is nginx.
+    expose: ["8080","8081"]                   # 8081 = management, internal network
     environment:
       JWKS_URI: http://users-service:8082/.well-known/jwks.json
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       EUREKA_URL: http://eureka:8761/eureka/
-      # AQUI SE DA DE ALTA A UN EQUIPO NUEVO. Separado por comas, sin espacios.
-      # Reemplaza entera la lista del application.yml. Registrarse en Eureka no
-      # alcanza: fuera de esta lista, /api/{loquesea}/** devuelve 404.
-      # Despues de tocarla: docker compose up -d api-gateway
+      # A NEW TEAM IS REGISTERED HERE. Comma-separated, no spaces.
+      # It replaces the whole application.yml list. Registering in Eureka is
+      # not enough: outside this list, /api/{anything}/** returns 404.
+      # After touching it: docker compose up -d api-gateway
       GATEWAY_ALLOWLIST: ${GATEWAY_ALLOWLIST:-users-service,echo-service}
-      # DEC-42 · concurrencia maxima POR DESTINO (BulkheadFilter). Bajarlo a 1
-      # es la forma de comprobar que el bulkhead esta vivo: con carga paralela
-      # tienen que aparecer 503 y lineas BULKHEAD_LLENO en el log.
+      # DEC-42 · max concurrency PER DESTINATION (BulkheadFilter). Lowering it
+      # to 1 is the way to check the bulkhead is alive: under parallel load
+      # you must get 503s and BULKHEAD_LLENO lines in the log.
       BULKHEAD_ENABLED: ${BULKHEAD_ENABLED:-true}
       BULKHEAD_MAX_CONCURRENT: ${BULKHEAD_MAX_CONCURRENT:-64}
     depends_on:
       users-service: {condition: service_healthy}
       redis: {condition: service_healthy}
       eureka: {condition: service_healthy}
-    # El unico servicio publico era el unico sin sonda. Va contra el management
-    # port, que SecurityConfig deja en permitAll solo para /actuator/health/**.
+    # The only public service was the only one without a probe. It goes
+    # against the management port, which SecurityConfig keeps at permitAll
+    # only for /actuator/health/**.
     healthcheck:
       test: ["CMD-SHELL","wget -qO- http://localhost:8081/actuator/health/readiness | grep -q UP"]
       interval: 10s
@@ -351,20 +356,18 @@ services:
         limits:
           memory: 768M
 
-  # Servicio de prueba del subsistema. Se comporta igual que cualquier otro
-  # micro: no valida el JWT, confia en los headers X-* y no publica su puerto.
-  # Da el SEGUNDO destino real, sin el cual no se puede demostrar que la
-  # identidad llega a un micro que no es users, ni que el `aud` de un token de
-  # servicio acota el alcance a un unico destino.
+  # Test service of the subsystem. Behaves like any other micro: it does not
+  # validate the JWT, it trusts the X-* headers and it does not publish its
+  # port. It provides the SECOND real destination, without which you cannot
+  # prove that identity reaches a micro that is not users, nor that the `aud`
+  # of a service token limits scope to a single destination.
   #
-  # Es tambien el ejemplo vivo de lo que tiene que hacer un equipo nuevo:
-  # mismas redes, mismo expose sin ports, misma registracion en Eureka.
+  # It is also the live example of what a new team must do: same networks,
+  # same expose without ports, same Eureka registration.
   echo-service:
-    # Dev: se construye desde el repo hermano pero taguea el nombre de GHCR,
-    # para no correr un binario viejo y mantener la imagen al dia con el build.
-    build:
-      context: ../echo-service
-      dockerfile: Dockerfile
+    # Dev: built from the sibling repo but tagged with the GHCR name, so as
+    # not to run a stale binary and to keep the image up to date with the
+    # build.
     image: ghcr.io/412061-ibazeta/echo-service:latest
     container_name: echo-service
     expose: ["8084","8085"]
@@ -388,7 +391,7 @@ services:
           memory: 512M
 
   # ---------------------------------------------------------------------------
-  # Observabilidad
+  # Observability
   # ---------------------------------------------------------------------------
 
   prometheus:
@@ -425,33 +428,34 @@ services:
           memory: 256M
 
 # ---------------------------------------------------------------------------
-# Redes
+# Networks
 # ---------------------------------------------------------------------------
 networks:
-  # Front <-> nginx. El dia que exista el repo del front, su contenedor va SOLO
-  # aca: sin membresia en tpi-edge no tiene ruta hacia el gateway.
+  # Front <-> nginx. The day the front repo exists, its container goes ONLY
+  # here: without membership in tpi-edge there is no route to the gateway.
   tpi-front:
     driver: bridge
 
-  # nginx <-> gateway. Dos miembros y punto.
+  # nginx <-> gateway. Two members and that is it.
   tpi-edge:
     driver: bridge
 
-  # LA RED COMPARTIDA de la plataforma. `name` fijo (sin el prefijo del
-  # proyecto) para que el compose de otro equipo la pueda referenciar tal cual:
+  # THE SHARED NETWORK of the platform. Fixed `name` (without the project
+  # prefix) so another team's compose can reference it as-is:
   #
   #     networks:
   #       tpi-platform:
   #         external: true
   #
-  # La crea este compose, asi que nuestro stack tiene que estar arriba primero
-  # — cosa que igual hace falta, porque ahi viven Eureka y el gateway.
+  # This compose creates it, so our stack has to be up first — which is needed
+  # anyway, because Eureka and the gateway live there.
   tpi-platform:
     name: tpi-platform
     driver: bridge
 
-  # MySQL y Redis. Deliberadamente fuera de la red compartida: un equipo que se
-  # suma se registra en Eureka y habla por el gateway, no le pega a nuestra base.
+  # MySQL and Redis. Deliberately outside the shared network: a team that
+  # joins registers in Eureka and talks through the gateway, it does not hit
+  # our database.
   tpi-data:
     driver: bridge
 

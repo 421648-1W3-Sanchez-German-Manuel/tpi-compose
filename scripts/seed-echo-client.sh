@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# El cliente de servicio de echo-service, que es un caso mas del general.
-# Quedo como atajo porque el README y el .env.example lo nombran; lo que hace
-# el trabajo es seed-service-client.sh.
+# echo-service's service client, which is one more case of the general one.
+# It stayed as a shortcut because the README and the .env.example name it; the
+# one that does the work is seed-service-client.sh.
 #
 #   ./scripts/seed-echo-client.sh
 #
-# El secreto que imprime va a ECHO_CLIENT_SECRET en el .env, y despues:
+# The secret it prints goes to ECHO_CLIENT_SECRET in the .env, and then:
 #   docker compose up -d --force-recreate echo-service
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-[ -f .env ] || { echo "Falta .env. Copialo de .env.example." >&2; exit 1; }
+[ -f .env ] || { echo "Missing .env. Copy it from .env.example." >&2; exit 1; }
 set -a; . ./.env; set +a
 
 exec "$(dirname "$0")/seed-service-client.sh" \
