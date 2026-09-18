@@ -1,32 +1,40 @@
-# TUP Gamified Platform · Theme 01 — local stack
+# TUP Gamified Platform · Theme 01 — NORMAL stack (tpi-compose-normal)
+#
+# The SAME stack as docker-compose.yml, with minimal differences:
+#   1. `name: tpi-compose-normal` + `container_name: *-normal` + `tpi-normal-*`
+#      networks: it does not clash with the dev stack on the same host.
+#      Run ONE AT A TIME (same 3000/8761/9090/3001 host ports).
+#   2. echo-service WITHOUT `build:`: published GHCR image only, with
+#      `pull_policy: always` — always the newest image, never the local one.
+#   3. Its own platform network (no fixed `name:`): no shared DNS with the
+#      dev stack (mysql/kafka/eureka would resolve to the other one).
 #
 # Implements DEC-40 (SPEC-api-gateway.md §16.2). The project name is
-# `tpi-compose` so it stands out from the rest in Docker Desktop.
+# `tpi-compose-normal` so it stands out from the rest in Docker Desktop.
 #
-#   docker compose up -d --build
-#   docker compose logs -f api-gateway
-#   docker compose down          (add -v to also delete the data)
+#   docker compose -f docker-compose.normal.yml up -d --build
+#   docker compose -f docker-compose.normal.yml logs -f api-gateway
+#   docker compose -f docker-compose.normal.yml down          (add -v to also delete the data)
 #
 # ---------------------------------------------------------------------------
 # NETWORK TOPOLOGY — the first thing to understand about this file
 # ---------------------------------------------------------------------------
 #
 #   browser ──► nginx :3000 ──► api-gateway ──► users / echo / whatever comes
-#                 [tpi-edge]      [tpi-platform]
+#                 [tpi-normal-edge]      [tpi-normal-platform]
 #
-#   tpi-front     nginx + the front. The front does NOT share a network with
+#   tpi-normal-front     nginx + the front. The front does NOT share a network with
 #                 the gateway, so there is no way to hit it directly, not
 #                 even by mistake.
-#   tpi-edge      nginx + api-gateway. Nothing else gets in here.
-#   tpi-platform  gateway + eureka + kafka + the micros. THIS IS THE SHARED
-#                 NETWORK: the other teams hook into this one and none other.
-#   tpi-data      mysql + redis + whoever has the right to read them. Outside
-#                 the shared network on purpose: a micro from another team
-#                 registers in Eureka, it does not talk to our database.
+#   tpi-normal-edge      nginx + api-gateway. Two members and that is it.
+#   tpi-normal-platform  gateway + eureka + kafka + the micros. Project-local
+#                 on purpose: sharing DNS with the dev stack would resolve
+#                 mysql/kafka/eureka to the other stack's containers.
+#   tpi-normal-data      mysql + redis. Deliberately outside the shared network.
 #
 # The ONLY published port of the stack is nginx's 3000 (plus Eureka's 8761,
 # which is the registry and has to be reachable — see there).
-name: tpi-compose
+name: tpi-compose-normal
 
 services:
 
@@ -39,7 +47,7 @@ services:
   # and the gateway stops publishing a port.
   nginx:
     image: nginx:1.27-alpine
-    container_name: nginx
+    container_name: nginx-normal
     ports: ["3000:3000"]
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
@@ -58,7 +66,7 @@ services:
     depends_on:
       api-gateway: {condition: service_healthy}
       webapp: {condition: service_healthy}
-    networks: [tpi-edge, tpi-front]
+    networks: [tpi-normal-edge, tpi-normal-front]
     deploy:
       resources:
         limits:
@@ -66,7 +74,7 @@ services:
 
   # The Angular SPA, served as static files by its own nginx.
   #
-  # Lives ONLY in tpi-front. It has no membership in tpi-edge or tpi-platform,
+  # Lives ONLY in tpi-normal-front. It has no membership in tpi-normal-edge or tpi-normal-platform,
   # so from this container there is no route to the gateway or the micros:
   # everything the browser asks of /api is forwarded by the edge proxy. That
   # is the structural half of "the front does not hit the gateway directly";
@@ -75,7 +83,7 @@ services:
     build:
       context: ../frontend-users
       dockerfile: Dockerfile
-    container_name: webapp
+    container_name: webapp-normal
     # NO ports: it is reached through the proxy's :3000, like everything else.
     expose: ["4200"]
     healthcheck:
@@ -86,7 +94,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
-    networks: [tpi-front]
+    networks: [tpi-normal-front]
     deploy:
       resources:
         limits:
@@ -101,8 +109,8 @@ services:
   # code does not exist inside any deployable image, and turning it off is
   # deleting this block — no environment variable to remember.
   #
-  # Networks: tpi-front (the browser consumes it via nginx), tpi-data (reads
-  # MySQL) and tpi-platform (publishes the resolved-padron event to Kafka,
+  # Networks: tpi-normal-front (the browser consumes it via nginx), tpi-normal-data (reads
+  # MySQL) and tpi-normal-platform (publishes the resolved-padron event to Kafka,
   # posing as Courses). That last one is what lets it unblock an account in
   # PENDING_COURSE, which is asynchronous and has no HTTP endpoint that
   # triggers it.
@@ -113,7 +121,7 @@ services:
     build:
       context: ./dev-mailbox
       dockerfile: Dockerfile
-    container_name: dev-mailbox
+    container_name: dev-mailbox-normal
     expose: ["4300"]
     environment:
       DB_HOST: mysql
@@ -135,7 +143,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
-    networks: [tpi-front, tpi-data, tpi-platform]
+    networks: [tpi-normal-front, tpi-normal-data, tpi-normal-platform]
     deploy:
       resources:
         limits:
@@ -155,7 +163,7 @@ services:
   # (the allowlist is required, see GATEWAY_ALLOWLIST below).
   eureka:
     image: steeltoeoss/eureka-server:latest
-    container_name: eureka
+    container_name: eureka-normal
     ports: ["8761:8761"]
     healthcheck:
       # The image ships wget and sh, not curl or bash.
@@ -164,7 +172,7 @@ services:
       timeout: 5s
       retries: 30
       start_period: 30s
-    networks: [tpi-platform]
+    networks: [tpi-normal-platform]
     deploy:
       resources:
         limits:
@@ -172,7 +180,7 @@ services:
 
   mysql:
     image: mysql:8.4                          # DEC-20 · LTS
-    container_name: mysql
+    container_name: mysql-normal
     environment:
       MYSQL_DATABASE: users
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?missing MYSQL_ROOT_PASSWORD in .env}
@@ -188,7 +196,7 @@ services:
       timeout: 5s
       retries: 30
       start_period: 20s
-    networks: [tpi-data]
+    networks: [tpi-normal-data]
     deploy:
       resources:
         limits:
@@ -196,7 +204,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: redis
+    container_name: redis-normal
     # Persistence: session:{userId} has no TTL, here Redis is the session
     # registry and not a cache. Without AOF, a restart logs everyone out.
     command: ["redis-server","--appendonly","yes"]
@@ -207,7 +215,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 30
-    networks: [tpi-data]
+    networks: [tpi-normal-data]
     deploy:
       resources:
         limits:
@@ -216,11 +224,11 @@ services:
   # Kafka is not part of Theme 01: the broker is shared platform
   # infrastructure and the topics are a contract with the team that owns them
   # (AGENTS.md). This is a local dev broker. Beware of auto-create when the
-  # real one is plugged in. It lives in tpi-platform because the other teams
+  # real one is plugged in. It lives in tpi-normal-platform because the other teams
   # also publish and consume.
   kafka:
     image: apache/kafka:3.8.0                 # KRaft, no Zookeeper
-    container_name: kafka
+    container_name: kafka-normal
     environment:
       KAFKA_HEAP_OPTS: "-Xmx512m -Xms256m"
       KAFKA_NODE_ID: 1
@@ -247,7 +255,7 @@ services:
       timeout: 10s
       retries: 30
       start_period: 30s
-    networks: [tpi-platform]
+    networks: [tpi-normal-platform]
     deploy:
       resources:
         limits:
@@ -261,7 +269,7 @@ services:
     build:
       context: ../users
       dockerfile: ../tpi-compose/users.Dockerfile
-    container_name: users-service
+    container_name: users-service-normal
     labels:
       prometheus.scrape: "true"
       prometheus.port: "8083"
@@ -272,7 +280,11 @@ services:
     # "X-User-Roles: ADMIN" gets in without password, token or 2FA.
     expose: ["8082","8083"]                   # DEC-28
     environment:
+      # Same one-line fix as PR #6: the app only reads DB_URL.
       DB_URL: "jdbc:mysql://mysql:3306/users?connectionTimeZone=UTC&preserveInstants=true"
+      # DEC-34: the Courses topic name is defined by its owner. Platform
+      # standard: one topic per domain.
+      TOPIC_COURSE_EVENTS: ${TOPIC_COURSE_VALIDATION:-course-events}
       DB_USER: root
       DB_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       REDIS_HOST: redis
@@ -291,10 +303,6 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@frc.utn.edu.ar}
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
-      # DEC-34 · el nombre del topico de Cursos lo define su dueño. Estandar de
-      # plataforma: topico por dominio (contrato Kafka del equipo de
-      # notificaciones). Lo viejo tema-02-cursos.validacion-resuelta.v1 quedo fuera.
-      TOPIC_COURSE_EVENTS: ${TOPIC_COURSE_VALIDATION:-course-events}
     volumes:
       - ./secrets:/run/secrets:ro             # gitignored. NEVER in the repo
     depends_on:
@@ -308,7 +316,7 @@ services:
       timeout: 5s
       retries: 30
       start_period: 60s
-    networks: [tpi-platform, tpi-data]
+    networks: [tpi-normal-platform, tpi-normal-data]
     deploy:
       resources:
         limits:
@@ -318,13 +326,13 @@ services:
     build:
       context: ../api-gateway
       dockerfile: Dockerfile
-    container_name: api-gateway
+    container_name: api-gateway-normal
     labels:
       prometheus.scrape: "true"
       prometheus.port: "8081"
       prometheus.path: "/actuator/prometheus"
     # NO LONGER PUBLISHES A PORT. The door is nginx:3000. The gateway lives in
-    # tpi-edge, where the only one that reaches it is nginx.
+    # tpi-normal-edge, where the only one that reaches it is nginx.
     expose: ["8080","8081"]                   # 8081 = management, internal network
     environment:
       JWKS_URI: http://users-service:8082/.well-known/jwks.json
@@ -354,7 +362,7 @@ services:
       timeout: 5s
       retries: 30
       start_period: 45s
-    networks: [tpi-edge, tpi-platform, tpi-data]
+    networks: [tpi-normal-edge, tpi-normal-platform, tpi-normal-data]
     deploy:
       resources:
         limits:
@@ -369,11 +377,11 @@ services:
   # It is also the live example of what a new team must do: same networks,
   # same expose without ports, same Eureka registration.
   echo-service:
-    # Dev: built from the sibling repo but tagged with the GHCR name, so as
-    # not to run a stale binary and to keep the image up to date with the
-    # build.
+    # NORMAL stack: NO build. It runs the published GHCR image only, always
+    # freshly pulled (pull_policy: always) — never the local source.
     image: ghcr.io/412061-ibazeta/echo-service:latest
-    container_name: echo-service
+    pull_policy: always
+    container_name: echo-service-normal
     expose: ["8084","8085"]
     environment:
       GATEWAY_URL: http://api-gateway:8080
@@ -388,7 +396,7 @@ services:
       timeout: 5s
       retries: 30
       start_period: 40s
-    networks: [tpi-platform]
+    networks: [tpi-normal-platform]
     deploy:
       resources:
         limits:
@@ -400,13 +408,13 @@ services:
 
   prometheus:
     image: prom/prometheus:latest
-    container_name: prometheus
+    container_name: prometheus-normal
     user: root
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     ports: ["9090:9090"]
-    networks: [tpi-platform]
+    networks: [tpi-normal-platform]
     deploy:
       resources:
         limits:
@@ -414,7 +422,7 @@ services:
 
   grafana:
     image: grafana/grafana:latest
-    container_name: grafana
+    container_name: grafana-normal
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
@@ -425,7 +433,7 @@ services:
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
-    networks: [tpi-platform]
+    networks: [tpi-normal-platform]
     deploy:
       resources:
         limits:
@@ -436,31 +444,23 @@ services:
 # ---------------------------------------------------------------------------
 networks:
   # Front <-> nginx. The day the front repo exists, its container goes ONLY
-  # here: without membership in tpi-edge there is no route to the gateway.
-  tpi-front:
+  # here: without membership in tpi-normal-edge there is no route to the gateway.
+  tpi-normal-front:
     driver: bridge
 
   # nginx <-> gateway. Two members and that is it.
-  tpi-edge:
+  tpi-normal-edge:
     driver: bridge
 
-  # THE SHARED NETWORK of the platform. Fixed `name` (without the project
-  # prefix) so another team's compose can reference it as-is:
-  #
-  #     networks:
-  #       tpi-platform:
-  #         external: true
-  #
-  # This compose creates it, so our stack has to be up first — which is needed
-  # anyway, because Eureka and the gateway live there.
-  tpi-platform:
-    name: tpi-platform
+  # Project-local platform network, deliberately WITHOUT a fixed `name:`: it
+  # must not be shared with (or resolve against) the dev stack's tpi-platform.
+  tpi-normal-platform:
     driver: bridge
 
   # MySQL and Redis. Deliberately outside the shared network: a team that
   # joins registers in Eureka and talks through the gateway, it does not hit
   # our database.
-  tpi-data:
+  tpi-normal-data:
     driver: bridge
 
 volumes:
