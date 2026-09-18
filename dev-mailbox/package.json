@@ -2,7 +2,7 @@
   "name": "dev-mailbox",
   "private": true,
   "type": "module",
-  "description": "Buzon de desarrollo: lee outbox_events y muestra codigos y enlaces. NO va a produccion.",
+  "description": "Development mailbox: reads outbox_events and shows codes and links. NOT for production.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

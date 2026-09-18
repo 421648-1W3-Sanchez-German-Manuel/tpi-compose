@@ -1,27 +1,27 @@
-# users-service · patron de SPEC-api-gateway.md §16.1
+# users-service · pattern of SPEC-api-gateway.md §16.1
 #
-# Vive aca y no en el repo `users` porque ese repo asigna dueños por archivo
-# (docs/TASK-ASSIGNMENT.md). El compose lo referencia con `dockerfile:`, que se
-# resuelve relativo al `context`. Cuando el Dockerfile pase al repo, esto se
-# borra y el compose vuelve a `build: ../users`.
+# Lives here and not in the `users` repo because that repo assigns owners per
+# file (docs/TASK-ASSIGNMENT.md). The compose references it with `dockerfile:`,
+# which resolves relative to the `context`. When the Dockerfile moves to the
+# repo, this is deleted and the compose goes back to `build: ../users`.
 #
-# Los comentarios van en su propia linea: Docker no los admite al final de una
-# instruccion. `USER app  # NO root` crea un usuario llamado "app  # NO root" y
-# el contenedor no arranca.
+# Comments go on their own line: Docker does not allow them at the end of an
+# instruction. `USER app  # NO root` creates a user called "app  # NO root" and
+# the container does not start.
 
 # ---- build ----
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /app
-# Capa cacheable: no se invalida al tocar codigo.
+# Cacheable layer: it does not invalidate when code changes.
 COPY pom.xml .
 RUN mvn -B dependency:go-offline
 COPY src ./src
-# Los tests corren en el pipeline. Un docker build que necesita Testcontainers
-# necesitaria un Docker adentro de Docker.
+# Tests run in the pipeline. A docker build that needs Testcontainers would
+# need a Docker inside Docker.
 RUN mvn -B clean package -DskipTests
 
 # ---- runtime ----
-# La imagen final no lleva Maven ni el codigo fuente.
+# The final image carries neither Maven nor the source code.
 FROM eclipse-temurin:21-jre-alpine
 RUN addgroup -S app && adduser -S app -G app
 # NO root.
@@ -29,6 +29,6 @@ USER app
 WORKDIR /app
 COPY --from=build /app/target/*.jar app.jar
 EXPOSE 8082 8083
-# MaxRAMPercentage en vez de -Xmx: respeta el limite del contenedor sin
-# hardcodear un numero.
+# MaxRAMPercentage instead of -Xmx: it honors the container limit without
+# hardcoding a number.
 ENTRYPOINT ["java","-XX:MaxRAMPercentage=75","-jar","app.jar"]

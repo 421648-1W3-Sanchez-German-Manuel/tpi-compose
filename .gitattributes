@@ -1,6 +1,6 @@
-# Los .sh corren dentro de contenedores Linux y desde bash. Con CRLF, bash
-# falla con un `$'\r': command not found` que no dice nada sobre la causa.
-# Esto los fuerza a LF en el checkout, tambien en Windows.
+# The .sh scripts run inside Linux containers and from bash. With CRLF, bash
+# fails with a `$'\r': command not found` that says nothing about the cause.
+# This forces them to LF on checkout, also on Windows.
 *.sh text eol=lf
 *.inc text eol=lf
 nginx/* text eol=lf
