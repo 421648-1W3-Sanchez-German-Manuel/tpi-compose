@@ -295,6 +295,13 @@ services:
       # plataforma: topico por dominio (contrato Kafka del equipo de
       # notificaciones). Lo viejo tema-02-cursos.validacion-resuelta.v1 quedo fuera.
       TOPIC_COURSE_EVENTS: ${TOPIC_COURSE_VALIDATION:-course-events}
+      # Git provider linking (SPEC-git-provider-linking). Off unless
+      # GITHUB_LINK_ENABLED=true and a client-id is set (DEC-GL-05).
+      GITHUB_LINK_ENABLED: ${GITHUB_LINK_ENABLED:-false}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:3000/vinculacion/callback}
+      GITHUB_SCOPE: ${GITHUB_SCOPE:-}
     volumes:
       - ./secrets:/run/secrets:ro             # gitignored. NEVER in the repo
     depends_on:
