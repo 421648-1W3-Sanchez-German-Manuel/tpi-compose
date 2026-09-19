@@ -27,7 +27,8 @@ Missing the email.
 
 To see who is waiting:
 
-  docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" users \
+  MYSQL_PWD="$(vault kv get -mount=secret -field=password tpi/identity/db)" \
+  docker compose exec -T -e MYSQL_PWD mysql mysql -uroot users \
     -e "SELECT email, account_status FROM users WHERE account_status='PENDING_COURSE';"
 USAGE
   exit 1
@@ -35,8 +36,16 @@ fi
 
 [ -f .env ] || { echo "Missing .env. Copy it from .env.example." >&2; exit 1; }
 set -a; . ./.env; set +a
+# shellcheck source=lib/vault.sh
+. scripts/lib/vault.sh
+vault_login
 
-sql() { docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" users -N -B -e "$1" 2>/dev/null; }
+# The MySQL root password lives in Vault; it reaches the container through the
+# environment, not the command line.
+MYSQL_PWD="$(vault_cli kv get -mount=secret -field=password tpi/identity/db </dev/null)"
+export MYSQL_PWD
+
+sql() { docker compose exec -T -e MYSQL_PWD mysql mysql -uroot users -N -B -e "$1" 2>/dev/null; }
 
 USER_ID="$(sql "SELECT id FROM users WHERE email='${EMAIL}' AND deleted_at IS NULL LIMIT 1;")"
 STATE="$(sql "SELECT account_status FROM users WHERE email='${EMAIL}' AND deleted_at IS NULL LIMIT 1;")"

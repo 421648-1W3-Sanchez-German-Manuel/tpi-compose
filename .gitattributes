@@ -7,3 +7,5 @@ nginx/* text eol=lf
 Dockerfile text eol=lf
 *.Dockerfile text eol=lf
 *.yml text eol=lf
+*.hcl text eol=lf
+*.tpl text eol=lf

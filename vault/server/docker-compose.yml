@@ -1,0 +1,62 @@
+# The shared Vault. Deployed on its own (separate project) so it stays up while
+# the application stack is brought up and down.
+#
+#   ./vault/tls/gen-certs.sh                       # once
+#   docker compose -f vault/server/docker-compose.yml up -d
+#   docker compose -f vault/server/docker-compose.yml exec -it vault-init sh /init/bootstrap.sh   # once
+#
+# Reachability: Vault is never published on a public interface. VAULT_BIND_ADDR
+# is the host address it listens on: 127.0.0.1 locally, the Tailscale IP of the
+# server in the shared environment.
+name: tpi-vault
+
+services:
+
+  vault:
+    image: hashicorp/vault:2.1.1
+    container_name: tpi-vault
+    # The image entrypoint adds -config=/vault/config (the directory) by itself.
+    command: ["server"]
+    environment:
+      VAULT_API_ADDR: ${VAULT_API_ADDR:-https://127.0.0.1:8200}
+      VAULT_CLUSTER_ADDR: ${VAULT_CLUSTER_ADDR:-https://127.0.0.1:8201}
+    ports: ["${VAULT_BIND_ADDR:-127.0.0.1}:8200:8200"]
+    volumes:
+      - ./vault.hcl:/vault/config/vault.hcl:ro
+      - ../../secrets/vault/tls:/vault/tls:ro
+      - vault-data:/vault/file
+      - vault-audit:/vault/logs
+    healthcheck:
+      # Exit code 0 only when initialized AND unsealed.
+      test: ["CMD-SHELL","VAULT_ADDR=https://127.0.0.1:8200 VAULT_CACERT=/vault/tls/ca.pem vault status >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  # Initializes Vault the first time and unseals it every time it is found
+  # sealed (restarts included). The single unseal key lives in the vault-init-data
+  # volume on the server, never in the repo.
+  vault-init:
+    image: hashicorp/vault:2.1.1
+    container_name: tpi-vault-init
+    entrypoint: ["/bin/sh", "/init/init.sh"]
+    user: "0:0"   # must be able to write the key file; the image default user cannot
+    environment:
+      VAULT_ADDR: https://vault:8200
+      VAULT_CACERT: /vault/tls/ca.pem
+    volumes:
+      - ./init.sh:/init/init.sh:ro
+      - ./bootstrap.sh:/init/bootstrap.sh:ro
+      - ../policies:/vault/policies:ro
+      - ../../secrets/vault/tls:/vault/tls:ro
+      - vault-init-data:/vault/init
+    depends_on:
+      vault: {condition: service_started}
+    restart: unless-stopped
+
+volumes:
+  vault-data:
+  vault-audit:
+  vault-init-data:
