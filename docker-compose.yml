@@ -295,6 +295,20 @@ services:
       # plataforma: topico por dominio (contrato Kafka del equipo de
       # notificaciones). Lo viejo tema-02-cursos.validacion-resuelta.v1 quedo fuera.
       TOPIC_COURSE_EVENTS: ${TOPIC_COURSE_VALIDATION:-course-events}
+      # Git provider linking (SPEC-git-provider-linking). Both halves are
+      # required and either one alone turns it off (DEC-GL-05): the adapter
+      # registers only with the flag on AND a client-id, so credentials left
+      # behind do not keep the endpoints alive, and the flag on without
+      # credentials degrades to off instead of locking the onboarding gate.
+      GITHUB_LINK_ENABLED: ${GITHUB_LINK_ENABLED:-false}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      # Follows the front origin by default: GitHub sends the browser back
+      # here, and the token exchange replays the same value, so a redirect
+      # pinned to localhost breaks every tester who moved USERS_FRONT_URL.
+      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-${USERS_FRONT_URL:-http://localhost:3000}/vinculacion/callback}
+      GITHUB_SCOPE: ${GITHUB_SCOPE:-}
+      GITHUB_STATE_TTL: ${GITHUB_STATE_TTL:-PT5M}
     volumes:
       - ./secrets:/run/secrets:ro             # gitignored. NEVER in the repo
     depends_on:
