@@ -11,6 +11,10 @@ fresh clone. What each piece is and why: [vault-contract.md](vault-contract.md).
 - Free ports: 3000, 3001, 8200, 8761, 9090. Stop any other stack first.
 - No Vault CLI: the scripts use the official image when there is none.
 
+**Where to type the commands.** Every command in this guide goes in a terminal (Git Bash),
+opened in the `tpi-compose` folder, unless a step says otherwise. Nothing goes in a file or inside
+a container: you type it and run it yourself. Step 1 leaves you in that folder.
+
 ## 1. Get the code
 
 The compose builds from sibling folders, so the four repos go side by side:
@@ -51,14 +55,31 @@ Vault initializes and unseals itself (`docker logs tpi-vault-init` shows "initia
 
 ## 4. Bootstrap (once)
 
+Run this only when `docker ps --filter name=tpi-vault` says **healthy** (step 3), in the same
+terminal and folder. It creates the account you will use to administer Vault, so it comes
+before step 5.
+
 ```bash
 docker compose -f vault/server/docker-compose.yml exec -T \
   -e BOOTSTRAP_OPERATORS="alice" -e OPERATOR_PASSWORD_alice='Local-Test-Pw-1' \
   vault-init sh /init/bootstrap.sh
 ```
 
-It loads the policies, creates the AppRoles and the operator `alice`, and revokes the
-root token. Running it a second time refuses.
+What the command says:
+
+- `BOOTSTRAP_OPERATORS="alice"`: the usernames to create, separated by spaces (`"ana luis"`).
+  **`alice` is just an example: pick your own name** (lowercase letters, digits and underscore).
+- `OPERATOR_PASSWORD_alice='...'`: that user's password. The variable name is
+  `OPERATOR_PASSWORD_` followed by the username, so for `ana` it is `OPERATOR_PASSWORD_ana`.
+  Pick your own password too.
+- Prefer not to leave the password in the command? Drop the `OPERATOR_PASSWORD_...` part and
+  change `-T` to `-it`: the script asks for each password on the keyboard.
+
+It loads the policies, creates the AppRoles and the operator accounts, and revokes the root
+token; it ends with `bootstrap done; root token revoked and deleted`. It runs **once**: running
+it a second time refuses, because the root token is gone.
+
+Keep the username and password: you use them in step 5 and to sign in to the UI (step 8).
 
 ## 5. Create the secrets and the Agents' credentials
 
@@ -67,6 +88,9 @@ export VAULT_USER=alice VAULT_PASSWORD='Local-Test-Pw-1'
 ./scripts/vault-seed-identity.sh           # MySQL password, JWT keys, admin and Grafana passwords
 ./scripts/vault-agent-creds.sh all         # one role_id + secret_id per Vault Agent
 ```
+
+`VAULT_USER` and `VAULT_PASSWORD` must be **the ones you chose in step 4** (not necessarily
+`alice`). If you leave them out, the scripts ask for them.
 
 Nothing is printed except what was created. The first run pulls the Vault image if needed.
 
@@ -106,7 +130,8 @@ http://localhost:3000/.well-known/jwks.json.
 
 ## 8. The Vault UI
 
-https://localhost:8200/ui, method **Username**, `alice` / `Local-Test-Pw-1`. The browser warns about
+https://localhost:8200/ui, method **Username**, with the operator you created in step 4 (`alice` in the
+examples). The browser warns about
 the certificate (private CA): accept it. As `alice` you see `tpi/identity/*`.
 
 ## 9. Try a team
