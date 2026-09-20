@@ -303,6 +303,9 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@frc.utn.edu.ar}
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
+      # SPEC §16.1 - the institutional domain(s) a student e-mail must belong to
+      # in order to self-register. Comma-separated for more than one.
+      REGISTRATION_ALLOWED_DOMAINS: ${REGISTRATION_ALLOWED_DOMAINS:-frc.utn.edu.ar}
       # Git provider linking. Both the flag and a client-id are required, and
       # either one alone turns it off (DEC-GL-05). Same block as docker-compose.yml.
       GITHUB_LINK_ENABLED: ${GITHUB_LINK_ENABLED:-false}

@@ -291,6 +291,9 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@frc.utn.edu.ar}
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
+      # SPEC §16.1 - the institutional domain(s) a student e-mail must belong to
+      # in order to self-register. Comma-separated for more than one.
+      REGISTRATION_ALLOWED_DOMAINS: ${REGISTRATION_ALLOWED_DOMAINS:-frc.utn.edu.ar}
       # DEC-34 · el nombre del topico de Cursos lo define su dueño. Estandar de
       # plataforma: topico por dominio (contrato Kafka del equipo de
       # notificaciones). Lo viejo tema-02-cursos.validacion-resuelta.v1 quedo fuera.
