@@ -63,6 +63,9 @@ Ibazeta on 2026-09-17, so tell them) and `scripts/seed-service-client.sh`
 - On Windows, a stray `OPENSSL_CONF` (PostgreSQL ODBC leaves one) breaks `openssl`;
   the scripts unset it when it points nowhere. Git Bash rewrites `/paths` passed to
   native tools: use `MSYS_NO_PATHCONV=1` when testing by hand.
+- By default the Vault listener asks every client for a TLS certificate, and browsers then show a
+  "select a certificate" dialog before the UI. `tls_disable_client_certs = true` turns it off (we
+  authenticate with AppRole and userpass, never certificates).
 - Pinned to `hashicorp/vault:2.1.1`.
 
 ## Existing local setups
