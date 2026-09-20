@@ -34,7 +34,7 @@ consumer (reads a file; no Vault SDK, no Vault calls)
 |---|---|---|
 | `secret/tpi/identity/*` | Identity's own secrets | in use |
 | `secret/tpi/shared/clients/<team>` | client_credentials secret issued to a team | in use (`seed-service-client-v2.sh`) |
-| `secret/tpi/<team>/*` | a team's private secrets; teams read and write their own | reserved |
+| `secret/tpi/<team>/*` | a team's private secrets and launch parameters; the team reads and writes its own | in use (`vault-onboard-team.sh`) |
 
 Operators (`operator` policy) manage `identity/*` and `shared/clients/*`. They have
 **no** access to `secret/tpi/<team>/*`.
@@ -58,6 +58,24 @@ paths above: `identity-users`, `identity-mysql`, `identity-dev-mailbox`,
 `secret_id` does not expire and is rotated on demand. `operator` is for the
 Identity developers (userpass, 8 h tokens).
 
+## Teams
+
+`./scripts/vault-onboard-team.sh <team> [member ...]` sets a team up:
+
+- policy `team-<team>` (from `vault/policies/team.hcl.tpl`): read and write on
+  `secret/tpi/<team>/*`, read on `secret/tpi/shared/clients/<team>`;
+- AppRole `<team>`, and its `secret_id` handed over **response-wrapped** (10 minutes, one use), so
+  the first one to read it is the team;
+- a userpass account `<team>-<member>` for each person who stores values by hand (UI or CLI), with
+  a generated initial password printed once;
+- an Agent config in `secrets/vault/teams/<team>/agent.hcl` (from `vault/agent/team-agent.hcl.tpl`).
+
+Launch parameters and environment variables live in one secret, `secret/tpi/<team>/env` (one key per
+variable). The team's Agent renders it as `/run/secrets/app.env`, plain dotenv, and
+`vault/agent/load-env.sh` loads it into the process. Guide for teams: [vault-teams.md](vault-teams.md).
+
+The Tailscale side (a tagged auth key per team) is done in the Tailscale console.
+
 ## Operating it
 
 ```bash
@@ -79,6 +97,10 @@ VAULT_ADDR=https://<vault>:8200 ./scripts/vault-agent-creds.sh all
   and no protection, and anyone who owns the whole host owns both.
 - **The root token is used once**, by `bootstrap.sh`, and then revoked and deleted.
   Day-to-day administration goes through the operators' userpass accounts.
+- **Changing a policy** in `vault/policies/` on a running Vault: `./scripts/vault-apply-policies.sh`
+  (no new bootstrap needed).
+- **The UI** is enabled at `<VAULT_ADDR>/ui` (login method **Username**). The certificate is
+  signed by the private CA, so browsers warn until `ca.pem` is trusted.
 - **Rotating a secret:** `vault kv put -mount=secret tpi/identity/<name> ...`; each
   Agent re-renders within its refresh interval (5 min by default). Consumers that
   read the value only at startup (users-service reads the DB password once) need a
@@ -102,6 +124,12 @@ VAULT_ADDR=https://<vault>:8200 ./scripts/vault-agent-creds.sh all
 - **Backup and restore of Vault** are deferred.
 
 ## Known limits
+
+- **Operators are administrators.** They cannot read `secret/tpi/<team>/*`, but they can write
+  policies and assign them, so an operator could grant themselves access. The audit device records
+  it; the protection is trust in the operators and that log, not the policy alone.
+- Team members' initial passwords are printed once by `vault-onboard-team.sh`; they travel through a
+  private channel and should be changed on first login.
 
 - The JWT kid is the file name `jwks/dev.pem`; rotating the kid means changing the
   template destination and `JWT_ACTIVE_KID` together.
