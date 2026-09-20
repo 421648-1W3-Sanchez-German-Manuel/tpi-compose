@@ -303,12 +303,14 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@frc.utn.edu.ar}
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
-      # Git provider linking. Off unless enabled + client-id set (DEC-GL-05).
+      # Git provider linking. Both the flag and a client-id are required, and
+      # either one alone turns it off (DEC-GL-05). Same block as docker-compose.yml.
       GITHUB_LINK_ENABLED: ${GITHUB_LINK_ENABLED:-false}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
-      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:3000/vinculacion/callback}
+      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-${USERS_FRONT_URL:-http://localhost:3000}/vinculacion/callback}
       GITHUB_SCOPE: ${GITHUB_SCOPE:-}
+      GITHUB_STATE_TTL: ${GITHUB_STATE_TTL:-PT5M}
     volumes:
       - ./secrets:/run/secrets:ro             # gitignored. NEVER in the repo
     depends_on:
