@@ -12,14 +12,12 @@ Materializa **DEC-40** (`api-gateway/docs/SPEC-api-gateway.md` §16).
 TPI/
 ├── users/            repo del users-service
 ├── api-gateway/      repo del gateway
-├── echo-service/     servicio de prueba del subsistema
 ├── frontend-users/   la SPA de Angular
 └── tpi-compose/      ← estás acá
 ```
 
-El compose construye desde `../users`, `../api-gateway`, `../echo-service`,
-`../frontend-users` y `./dev-mailbox`: los repos tienen que ser hermanos de
-`tpi-compose` (y dev-mailbox vive adentro del propio tpi-compose).
+El compose construye desde `../users`, `../api-gateway` y `../frontend-users`:
+los repos tienen que ser hermanos de `tpi-compose`.
 
 ## Levantarlo
 
@@ -28,7 +26,7 @@ cd tpi-compose
 bash ../users/scripts/gen-dev-keys.sh dev    # claves RS256 de desarrollo
 cp .env.example .env                         # y completá MYSQL_ROOT_PASSWORD
 
-docker compose up -d --build                 # la primera vez compila los cinco servicios
+docker compose up -d --build                 # la primera vez compila los servicios propios
 docker compose logs -f api-gateway
 ```
 
@@ -42,8 +40,7 @@ de identidad no tiene que levantar con claves improvisadas.
                           ┌──► webapp (Angular)   [tpi-front]
 navegador ──► nginx :3000 ─┤
               [tpi-edge]   └──► api-gateway ──► users-service
-                                [tpi-platform]  echo-service
-                                                (y los que vengan)
+                                [tpi-platform]  (y los que vengan)
 ```
 
 El front y la API salen por el **mismo origen** (`:3000`). De ahí que no exista
@@ -60,11 +57,9 @@ preflight y no haya CORS que configurar en ninguna parte.
 |---|---|---|
 | `nginx` | `nginx:1.27-alpine` | **3000 publicado** |
 | `webapp` | `../frontend-users` | interno 4200 |
-| `dev-mailbox` | `./dev-mailbox` | interno 4300 · **solo desarrollo** |
 | `eureka` | `steeltoeoss/eureka-server` | **8761 publicado** (es el registro) |
 | `api-gateway` | `../api-gateway` | interno 8080 / 8081 |
 | `users-service` | `../users` | interno 8082 / 8083 |
-| `echo-service` | `../echo-service` | interno 8084 / 8085 |
 | `mysql` | `mysql:8.4` | interno 3306 |
 | `redis` | `redis:7-alpine` | interno 6379 |
 | `kafka` | `apache/kafka:3.8.0` (KRaft) | interno 9092 |
@@ -98,58 +93,6 @@ gateway ni a los micros. Todo lo que el navegador pide a `/api` lo reenvía el
 proxy. Los estáticos los sirve el nginx interno del front
 (`frontend-users/nginx.conf`), con `try_files` para que un `/activate?token=...`
 abierto directo desde el mail llegue al Router de Angular.
-
-### El buzón de desarrollo
-
-Como no hay servidor de mail, los códigos de 2FA y los enlaces de activación y
-de reset quedan en `outbox_events`. El contenedor `dev-mailbox` los lee y los
-sirve en `/dev/mailbox`; el front dibuja un botón 📬 flotante que los muestra
-con un botón de copiar y se refresca solo.
-
-> ⛔ **No va a producción, ni detrás de un flag.** Lista tokens de activación y
-> códigos de 2FA de **cualquier** cuenta: publicarlo es regalar todas las
-> cuentas sin pedir una sola contraseña.
-
-Está como servicio aparte, y no como endpoint de `users-service`, justamente
-para que ese código no exista dentro de ninguna imagen desplegable. Para
-apagarlo alcanza con borrar el servicio del compose y su `location` del nginx;
-no hay ninguna variable que acordarse de poner en `false`.
-
-También trae un botón **"resolver padrón"** por cada cuenta trabada en
-`PENDING_COURSE`. Publica en Kafka el evento que en la plataforma real manda
-Cursos (`course-events`), en vez de tocar la base: así
-ejercita el listener, la idempotencia por `eventId` y el mail de padrón
-resuelto. Un `UPDATE` directo daría el mismo estado final sin probar nada de
-eso. Lo mismo desde la terminal: `./scripts/resolver-padron.sh <email>`.
-
-La tercera pestaña es **Logs**: la traza micro-a-micro que escribe el Gateway
-(`InterMicroTraceFilter`, en `api-gateway`) en una lista de Redis
-(`intermicro:trace`, capada a 200). Cada entrada dice de dónde a dónde fue la
-llamada — `PERSON`/`MS`/`ANON`, destino, método, path, status y ms — y el buzón
-la lee en `/dev/logs` (solo lectura; nada de esto toca Redis).
-
-Para verla en vivo hay un botón **"probar flujo micro → micro"** que dispara el
-round-trip de `echo-service`: el front pega `GET /api/echo/cliente/perfil/{id}`
-con el token de la sesión, echo pide su token de servicio y llama a
-`users-service` por el Gateway. Resultado: tres entradas seguidas —
-`PERSON`→echo, echo pidiendo token, `MS`→users — que dicen lo que iba a decir el
-gif de monitos: la identidad viaja como header `X-*`, y la confianza de los
-micros se respalda acá porque el único camino es el Gateway.
-
-> ⚠️ **En dev se construye desde `./dev-mailbox` con el nombre de la imagen de
-> GHCR.** Si tocás `dev-mailbox/server.js` alcanza con
-> `docker compose up -d --build dev-mailbox`. La imagen de GHCR sigue existiendo
-> para los que no tienen este repo; mantenerla al día es:
->
-> ```bash
-> docker compose build dev-mailbox
-> docker push ghcr.io/412061-ibazeta/dev-mailbox:latest
-> ```
-
-El widget del front **se dibuja solo si `/dev/mailbox` contesta**. En cualquier
-despliegue sin este contenedor, el `fetch` falla y el botón no aparece — es
-detección por capacidad y no una bandera de build, porque una bandera hay que
-acordarse de apagarla.
 
 ### Por qué Eureka sí publica puerto
 
@@ -225,7 +168,7 @@ harness de cualquiera de los dos repos.
 
 ```bash
 # 1. allowlist: agregar el serviceId en .env y recrear el gateway
-#    GATEWAY_ALLOWLIST=users-service,echo-service,cursos-service
+#    GATEWAY_ALLOWLIST=users-service,cursos-service
 docker compose up -d api-gateway
 
 # 2. si además va a LLAMAR a otro micro, sus credenciales de servicio
@@ -357,9 +300,7 @@ docker compose up -d --force-recreate api-gateway   # volver a 64
   cadena de Security corre antes que el ruteo. Con token válido sí da
   `404 route-not-found`.
 - **No hay servidor de mail.** Los códigos y los enlaces de activación quedan
-  encolados en `outbox_events`. Lo más cómodo es el **buzón flotante** del front
-  (botón 📬 abajo a la derecha, en cualquier pantalla), que los muestra con un
-  botón de copiar. Si preferís la consola:
+  encolados en `outbox_events`. Se consultan por consola:
 
   ```bash
   docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" users \
