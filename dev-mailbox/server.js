@@ -81,7 +81,7 @@ function toMail(row) {
   return {
     id: row.event_id,
     para: envelope?.payload?.to ?? null,
-    asunto: envelope?.payload?.asunto ?? null,
+    asunto: envelope?.payload?.subject ?? null,
     tipo: envelope?.eventType ?? null,
     fecha: row.created_at,
     codigo: extractCode(html),
