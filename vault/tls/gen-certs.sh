@@ -35,7 +35,7 @@ if [ -f "$OUT/server.pem" ] && [ "$FORCE" -eq 0 ]; then
 fi
 
 mkdir -p "$OUT"
-SAN="DNS:vault,DNS:localhost,DNS:host.docker.internal,IP:127.0.0.1"
+SAN="DNS:vault,DNS:tpi-vault,DNS:localhost,DNS:host.docker.internal,IP:127.0.0.1"
 IFS=',' read -r -a EXTRAS <<< "$EXTRA"
 for e in "${EXTRAS[@]:-}"; do
   [ -z "$e" ] && continue
