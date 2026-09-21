@@ -20,12 +20,21 @@ vault_cli() {
     vault "$@"
     return
   fi
-  # From inside a container, the host's loopback is host.docker.internal.
-  local addr="${VAULT_ADDR/\/\/localhost/\/\/host.docker.internal}"
-  addr="${addr/\/\/127.0.0.1/\/\/host.docker.internal}"
   local ca_dir ca
   ca_dir="$(cd "$(dirname "$VAULT_CACERT")" && (pwd -W 2>/dev/null || pwd))"
   ca="$ca_dir/$(basename "$VAULT_CACERT")"
+  # VAULT_DOCKER_NETWORK=container:<sidecar> runs the CLI inside the namespace
+  # of a container that is on the tailnet (the Vault sidecar on the server, or
+  # any mesh sidecar); VAULT_ADDR is then used as given.
+  if [ -n "${VAULT_DOCKER_NETWORK:-}" ]; then
+    MSYS_NO_PATHCONV=1 docker run --rm -i --network "$VAULT_DOCKER_NETWORK" \
+      -e VAULT_ADDR -e VAULT_TOKEN -e VAULT_CACERT=/vault-ca.pem \
+      -v "$ca:/vault-ca.pem:ro" "$VAULT_IMAGE" vault "$@"
+    return
+  fi
+  # From inside a container, the host's loopback is host.docker.internal.
+  local addr="${VAULT_ADDR/\/\/localhost/\/\/host.docker.internal}"
+  addr="${addr/\/\/127.0.0.1/\/\/host.docker.internal}"
   MSYS_NO_PATHCONV=1 docker run --rm -i --add-host host.docker.internal:host-gateway \
     -e VAULT_ADDR="$addr" -e VAULT_TOKEN -e VAULT_CACERT=/vault-ca.pem \
     -v "$ca:/vault-ca.pem:ro" "$VAULT_IMAGE" vault "$@"
