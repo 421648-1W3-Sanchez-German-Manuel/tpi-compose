@@ -18,6 +18,12 @@ auto_auth {
   }
 }
 
+# KV values are static secrets: poll them so a changed value reaches the file without
+# restarting the Agent. The consumer still reads the file at launch.
+template_config {
+  static_secret_render_interval = "1m"
+}
+
 template {
   contents    = <<EOT
 {{ with secret "secret/data/tpi/__TEAM__/env" }}{{ range $k, $v := .Data.data }}{{ $k }}={{ $v }}

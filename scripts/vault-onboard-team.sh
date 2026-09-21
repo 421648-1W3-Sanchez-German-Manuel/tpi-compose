@@ -11,7 +11,7 @@
 #   - the secret_id is response-wrapped (10 minutes, one use): the team unwraps
 #     it and that is the first time anyone reads it, Identity included;
 #   - a member's initial password, generated here. Send it through a private
-#     channel and ask them to change it (UI: top-right menu, "Change password").
+#     channel (it can only be replaced by re-running this script for that member).
 #
 # The Tailscale side (a tagged auth key for the team) is done in the Tailscale
 # console; it is not something Vault can do.
@@ -82,7 +82,7 @@ for m in "${MEMBERS[@]:-}"; do
 done
 cat <<FIN
 
-  Still manual: a Tailscale auth key tagged tag:$TEAM for the team's devices.
+  Still manual: the team joins the mesh with the shared tag:microservicio auth key (vincular-tailscale-mesh).
   Guide for the team: docs/vault-teams.md
 
 FIN

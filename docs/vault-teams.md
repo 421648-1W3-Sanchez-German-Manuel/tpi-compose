@@ -61,27 +61,39 @@ per line, plain dotenv (no quotes, no newlines inside a value). Your service nev
 `vault/agent/load-env.sh` loads that file and runs your command. Values are taken
 literally, so a `$` or a space in a secret is safe.
 
-### In Docker (a sidecar)
+### In Docker on the mesh (verified on the real tailnet)
+
+The Agent joins the network namespace of your Tailscale sidecar (the one from the
+mesh skill, `vincular-tailscale-mesh`) and reaches Vault by MagicDNS name. No
+`extra_hosts`, `dns`, `networks` or `ports` with `network_mode: "service:..."`;
+the resolver comes from the same `resolv.conf` your micro already mounts.
 
 ```yaml
 services:
+  # `mesh` is your existing Tailscale sidecar (tag:microservicio).
   vault-agent:
     image: hashicorp/vault:2.1.1
-    command: ["agent", "-config=/vault/auth/agent.hcl"]
+    network_mode: "service:mesh"
+    command: ["agent", "-config=/vault/agent.hcl"]
     environment:
-      VAULT_ADDR: ${VAULT_ADDR}
-      VAULT_CACERT: /vault/auth/ca.pem
-    extra_hosts: ["host.docker.internal:host-gateway"]
+      VAULT_ADDR: https://tpi-vault:8200
+      VAULT_CACERT: /vault/ca.pem
     volumes:
-      - ./.vault:/vault/auth:ro          # role_id, secret_id, agent.hcl, ca.pem
+      - ./.vault/agent.hcl:/vault/agent.hcl:ro
+      - ./.vault/ca.pem:/vault/ca.pem:ro
+      - ./.vault/auth:/vault/auth:ro     # role_id, secret_id
+      - ./resolv.conf:/etc/resolv.conf:ro
       - app-secrets:/run/secrets
     healthcheck:
-      test: ["CMD-SHELL", "test -e /run/secrets/app.env"]
+      test: ["CMD-SHELL", "test -s /run/secrets/app.env"]
       interval: 5s
       retries: 40
+    depends_on:
+      mesh: {condition: service_healthy}
 
   my-service:
     image: my-service
+    network_mode: "service:mesh"
     entrypoint: ["/bin/sh", "/load-env.sh", "/run/secrets/app.env"]
     command: ["sh", "-c", "exec java $$JAVA_OPTS -jar app.jar"]
     volumes:
@@ -94,6 +106,9 @@ volumes:
   app-secrets:
     driver_opts: {type: tmpfs, device: tmpfs}
 ```
+
+The CLI (storing values by hand) runs the same way, inside the mesh namespace:
+`docker run --rm -it --network container:mesh -v ./resolv.conf:/etc/resolv.conf:ro -v ./.vault/ca.pem:/ca.pem:ro -e VAULT_ADDR=https://tpi-vault:8200 -e VAULT_CACERT=/ca.pem hashicorp/vault:2.1.1 vault login -method=userpass username=<team>-<you>`
 
 ### From your IDE (no Docker)
 
