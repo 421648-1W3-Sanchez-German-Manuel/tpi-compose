@@ -25,16 +25,21 @@ El compose construye desde `../users`, `../api-gateway`, `../echo-service`,
 
 ```bash
 cd tpi-compose
-bash ../users/scripts/gen-dev-keys.sh dev    # claves RS256 de desarrollo
-cp .env.example .env                         # y completá MYSQL_ROOT_PASSWORD
+cp .env.example .env                         # set VAULT_ADDR: where the shared Vault is
+./scripts/vault-agent-creds.sh all           # AppRole credentials of the Vault Agents (asks for your Vault login)
 
-docker compose up -d --build                 # la primera vez compila los cinco servicios
+docker compose up -d --build                 # the first time it builds the services
 docker compose logs -f api-gateway
 ```
 
-`secrets/` y `.env` están en el `.gitignore` y no viajan con el repo. Sin las
-claves RS256 el users-service **se niega a arrancar**, a propósito: un servicio
-de identidad no tiene que levantar con claves improvisadas.
+The secrets (MySQL password, RS256 keys, initial admin password, Grafana
+password) are **not** in `.env` or in this repo: they live in Vault and reach
+each container as a file through a Vault Agent. See
+[docs/vault-contract.md](docs/vault-contract.md) for how Vault is brought up
+and how a secret is read or rotated. `secrets/` and `.env` are gitignored.
+Without a reachable Vault the Agents never become healthy and `mysql` and
+`users-service` **refuse to start**, on purpose: an identity service must not
+come up with improvised keys.
 
 ## Topología
 
@@ -229,8 +234,8 @@ harness de cualquiera de los dos repos.
 docker compose up -d api-gateway
 
 # 2. si además va a LLAMAR a otro micro, sus credenciales de servicio
-./scripts/seed-service-client.sh cursos-service users.profile.read
-#    imprime el clientSecret UNA vez -> se lo pasás por un canal privado
+./scripts/seed-service-client-v2.sh cursos-service users.profile.read
+#    guarda el clientSecret en Vault (secret/tpi/shared/clients/cursos); no lo imprime
 ```
 
 ### Verificar, de los dos lados
@@ -301,8 +306,8 @@ curl -s -X POST http://localhost:3000/api/users/public/auth/login \
   -d '{"email":"admin@frc.utn.edu.ar","password":"LA-DEL-LOG"}'
 
 # 3. el code de 2FA no llega por mail: queda en el outbox
-source .env
-docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" users -N -B \
+export MYSQL_PWD="$(vault kv get -mount=secret -field=password tpi/identity/db)"
+docker compose exec -T -e MYSQL_PWD mysql mysql -uroot users -N -B \
   -e "SELECT payload FROM outbox_events ORDER BY created_at DESC LIMIT 1;" \
   | grep -oE 'letter-spacing:4px[^0-9]*[0-9]{6}' | grep -oE '[0-9]{6}$'
 
@@ -362,7 +367,8 @@ docker compose up -d --force-recreate api-gateway   # volver a 64
   botón de copiar. Si preferís la consola:
 
   ```bash
-  docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" users \
+  export MYSQL_PWD="$(vault kv get -mount=secret -field=password tpi/identity/db)"
+  docker compose exec -T -e MYSQL_PWD mysql mysql -uroot users \
     -e "SELECT topic, published_at, LEFT(payload,200) FROM outbox_events \
         ORDER BY created_at DESC LIMIT 5\G"
   ```

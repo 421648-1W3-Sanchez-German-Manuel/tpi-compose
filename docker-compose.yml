@@ -28,6 +28,21 @@
 # which is the registry and has to be reachable — see there).
 name: tpi-compose
 
+# Shared settings of every Vault Agent sidecar (see the "Secrets" section). The
+# Vault server is NOT part of this file: it runs on its own, see
+# vault/server/docker-compose.yml. VAULT_ADDR is wherever that one is reachable.
+x-vault-agent: &vault-agent
+  image: hashicorp/vault:2.1.1
+  environment:
+    VAULT_ADDR: ${VAULT_ADDR:?missing VAULT_ADDR in .env (address of the shared Vault)}
+    VAULT_CACERT: /vault/tls/ca.pem
+  extra_hosts: ["host.docker.internal:host-gateway"]
+  restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        memory: 64M
+
 services:
 
   # ---------------------------------------------------------------------------
@@ -119,13 +134,16 @@ services:
       DB_HOST: mysql
       DB_NAME: users
       DB_USER: root
-      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      DB_PASSWORD_FILE: /run/secrets/db-password
       KAFKA_BROKERS: kafka:9092
       TOPIC_COURSE_VALIDATION: ${TOPIC_COURSE_VALIDATION:-course-events}
       # Where the Logs tab reads from: the trace the Gateway leaves in Redis.
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+    volumes:
+      - dev-mailbox-secrets:/run/secrets:ro
     depends_on:
+      vault-agent-dev-mailbox: {condition: service_healthy}
       mysql: {condition: service_healthy}
       kafka: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -175,19 +193,24 @@ services:
     container_name: mysql
     environment:
       MYSQL_DATABASE: users
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?missing MYSQL_ROOT_PASSWORD in .env}
+      # Read from the file the Vault Agent writes; the password is not in the environment.
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/db-password
     command: >
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_0900_ai_ci
       --default-time-zone=+00:00
     expose: ["3306"]
-    volumes: [mysql-data:/var/lib/mysql]
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - mysql-secrets:/run/secrets:ro
     healthcheck:
-      test: ["CMD","mysqladmin","ping","-h","localhost","-uroot","-p${MYSQL_ROOT_PASSWORD}"]
+      test: ["CMD-SHELL","MYSQL_PWD=$$(cat /run/secrets/db-password) mysqladmin ping -h localhost -uroot"]
       interval: 5s
       timeout: 5s
       retries: 30
       start_period: 20s
+    depends_on:
+      vault-agent-mysql: {condition: service_healthy}
     networks: [tpi-data]
     deploy:
       resources:
@@ -254,6 +277,88 @@ services:
           memory: 1G
 
   # ---------------------------------------------------------------------------
+  # Secrets: one Vault Agent per consumer
+  # ---------------------------------------------------------------------------
+  #
+  # Each Agent authenticates to the shared Vault with its own AppRole
+  # (secrets/vault/agents/<role>/, issued by scripts/vault-agent-creds.sh) and
+  # renders only what its policy allows into a tmpfs volume that it shares, and
+  # only, with its consumer. Each Agent sits alone on its own network: it needs
+  # a way OUT to Vault and nothing can reach it. The consumer never talks to
+  # Vault and needs no SDK: it reads files.
+  #
+  # An Agent is healthy once every file exists, so the consumer's depends_on
+  # keeps it from starting with an empty secret.
+
+  vault-agent-users:
+    <<: *vault-agent
+    container_name: vault-agent-users
+    command: ["agent", "-config=/vault/agent/agent.hcl"]
+    volumes:
+      - ./vault/agent/users.hcl:/vault/agent/agent.hcl:ro
+      - ./secrets/vault/agents/identity-users:/vault/auth:ro
+      - ./secrets/vault/tls/ca.pem:/vault/tls/ca.pem:ro
+      - users-secrets:/run/secrets
+    healthcheck:
+      test: ["CMD-SHELL","test -s /run/secrets/config/db-password && test -s /run/secrets/config/admin-bootstrap-password && test -s /run/secrets/jwt-private.pem && test -s /run/secrets/jwks/dev.pem"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 5s
+    networks: [vault-users]
+
+  vault-agent-mysql:
+    <<: *vault-agent
+    container_name: vault-agent-mysql
+    command: ["agent", "-config=/vault/agent/agent.hcl"]
+    volumes:
+      - ./vault/agent/mysql.hcl:/vault/agent/agent.hcl:ro
+      - ./secrets/vault/agents/identity-mysql:/vault/auth:ro
+      - ./secrets/vault/tls/ca.pem:/vault/tls/ca.pem:ro
+      - mysql-secrets:/run/secrets
+    healthcheck:
+      test: ["CMD-SHELL","test -s /run/secrets/db-password"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 5s
+    networks: [vault-mysql]
+
+  vault-agent-dev-mailbox:
+    <<: *vault-agent
+    container_name: vault-agent-dev-mailbox
+    command: ["agent", "-config=/vault/agent/agent.hcl"]
+    volumes:
+      - ./vault/agent/dev-mailbox.hcl:/vault/agent/agent.hcl:ro
+      - ./secrets/vault/agents/identity-dev-mailbox:/vault/auth:ro
+      - ./secrets/vault/tls/ca.pem:/vault/tls/ca.pem:ro
+      - dev-mailbox-secrets:/run/secrets
+    healthcheck:
+      test: ["CMD-SHELL","test -s /run/secrets/db-password"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 5s
+    networks: [vault-dev-mailbox]
+
+  vault-agent-grafana:
+    <<: *vault-agent
+    container_name: vault-agent-grafana
+    command: ["agent", "-config=/vault/agent/agent.hcl"]
+    volumes:
+      - ./vault/agent/grafana.hcl:/vault/agent/agent.hcl:ro
+      - ./secrets/vault/agents/identity-grafana:/vault/auth:ro
+      - ./secrets/vault/tls/ca.pem:/vault/tls/ca.pem:ro
+      - grafana-secrets:/run/secrets
+    healthcheck:
+      test: ["CMD-SHELL","test -s /run/secrets/admin-password"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 5s
+    networks: [vault-grafana]
+
+  # ---------------------------------------------------------------------------
   # Microservices
   # ---------------------------------------------------------------------------
 
@@ -274,7 +379,9 @@ services:
     environment:
       DB_URL: "jdbc:mysql://mysql:3306/users?connectionTimeZone=UTC&preserveInstants=true"
       DB_USER: root
-      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      # No DB_PASSWORD / ADMIN_BOOTSTRAP_PASSWORD here on purpose: an environment
+      # variable would win over the Vault-written files (Spring gives the
+      # environment precedence over Config Tree).
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       KAFKA_SERVERS: kafka:9092
@@ -290,7 +397,6 @@ services:
       # touch this variable.
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:-admin@frc.utn.edu.ar}
-      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
       # SPEC §16.1 - the institutional domain(s) a student e-mail must belong to
       # in order to self-register. Comma-separated for more than one.
       REGISTRATION_ALLOWED_DOMAINS: ${REGISTRATION_ALLOWED_DOMAINS:-frc.utn.edu.ar}
@@ -313,8 +419,9 @@ services:
       GITHUB_SCOPE: ${GITHUB_SCOPE:-}
       GITHUB_STATE_TTL: ${GITHUB_STATE_TTL:-PT5M}
     volumes:
-      - ./secrets:/run/secrets:ro             # gitignored. NEVER in the repo
+      - users-secrets:/run/secrets:ro         # written by vault-agent-users, in memory (tmpfs)
     depends_on:
+      vault-agent-users: {condition: service_healthy}
       mysql: {condition: service_healthy}
       redis: {condition: service_healthy}
       kafka: {condition: service_healthy}
@@ -434,14 +541,16 @@ services:
     container_name: grafana
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/admin-password
     ports: ["3001:3000"]
     volumes:
       - grafana-data:/var/lib/grafana
+      - grafana-secrets:/run/secrets:ro
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
-      - prometheus
+      prometheus: {condition: service_started}
+      vault-agent-grafana: {condition: service_healthy}
     networks: [tpi-platform]
     deploy:
       resources:
@@ -480,8 +589,29 @@ networks:
   tpi-data:
     driver: bridge
 
+  # One private network per Vault Agent: outbound to Vault only, nobody else
+  # attached. Not `internal`, because the Agent has to reach Vault.
+  vault-users:
+    driver: bridge
+  vault-mysql:
+    driver: bridge
+  vault-dev-mailbox:
+    driver: bridge
+  vault-grafana:
+    driver: bridge
+
 volumes:
   mysql-data:
   redis-data:
   kafka-data:
   grafana-data:
+  # Secrets rendered by the Vault Agents. tmpfs: they live in memory only and
+  # exist while the Agent (or its consumer) has the volume mounted.
+  users-secrets:
+    driver_opts: {type: tmpfs, device: tmpfs}
+  mysql-secrets:
+    driver_opts: {type: tmpfs, device: tmpfs}
+  dev-mailbox-secrets:
+    driver_opts: {type: tmpfs, device: tmpfs}
+  grafana-secrets:
+    driver_opts: {type: tmpfs, device: tmpfs}

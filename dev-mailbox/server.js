@@ -15,6 +15,7 @@
 // is deleting the service from the compose; no variable to remember.
 // ---------------------------------------------------------------------------
 import http from 'node:http';
+import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import mysql from 'mysql2/promise';
 import { Kafka } from 'kafkajs';
@@ -41,11 +42,16 @@ const redis = new Redis({
   maxRetriesPerRequest: 1,
 });
 
+// DB_PASSWORD_FILE (a file written by the Vault Agent) wins over DB_PASSWORD.
+const dbPassword = process.env.DB_PASSWORD_FILE
+  ? readFileSync(process.env.DB_PASSWORD_FILE, 'utf8').trim()
+  : (process.env.DB_PASSWORD ?? '');
+
 const pool = mysql.createPool({
   host: process.env.DB_HOST ?? 'mysql',
   port: Number(process.env.DB_PORT ?? 3306),
   user: process.env.DB_USER ?? 'root',
-  password: process.env.DB_PASSWORD ?? '',
+  password: dbPassword,
   database: process.env.DB_NAME ?? 'users',
   connectionLimit: 4,
   // The users-service poller deletes or marks the rows; if the mailbox keeps

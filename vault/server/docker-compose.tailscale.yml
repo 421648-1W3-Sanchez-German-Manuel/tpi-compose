@@ -1,0 +1,53 @@
+# Overlay for the shared server: Vault joins the tailnet through its own
+# Tailscale sidecar (tag:vault) and is reached by MagicDNS name, never by IP.
+#
+#   ./vault/tls/gen-certs.sh tpi-vault.<tailnet>.ts.net      # once
+#   cp vault/server/tailscale.env.example vault/server/.env # fill TS_AUTHKEY
+#   docker compose -f vault/server/docker-compose.yml -f vault/server/docker-compose.tailscale.yml up -d
+#   docker compose -f vault/server/docker-compose.yml -f vault/server/docker-compose.tailscale.yml \
+#     exec -it vault-init sh /init/bootstrap.sh                # once
+#
+# vault and vault-init share the sidecar's network namespace (same pattern as
+# every micro on the mesh), so Vault is only reachable through the tailnet and
+# the ACL decides who gets to port 8200. Nothing is published on the host.
+# Requires Docker Compose >= 2.24 (`!reset`).
+name: tpi-vault
+
+services:
+
+  tailscale:
+    image: tailscale/tailscale:v1.102.3
+    container_name: tpi-vault-ts
+    hostname: ${TS_HOSTNAME:-tpi-vault}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?set TS_AUTHKEY (tagged tag:vault) in vault/server/.env}
+      TS_HOSTNAME: ${TS_HOSTNAME:-tpi-vault}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"   # kernel mode: real tailscale0 interface
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add: [NET_ADMIN, NET_RAW]
+    healthcheck:
+      test: ["CMD-SHELL","tailscale status --json | grep -q '\"BackendState\": \"Running\"'"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 20s
+    restart: unless-stopped
+
+  vault:
+    network_mode: "service:tailscale"
+    ports: !reset []
+    depends_on:
+      tailscale: {condition: service_healthy}
+
+  vault-init:
+    network_mode: "service:tailscale"
+    environment:
+      VAULT_ADDR: https://localhost:8200   # same namespace; localhost is in the certificate SANs
+    depends_on:
+      tailscale: {condition: service_healthy}
+
+volumes:
+  tailscale-state:
