@@ -4,10 +4,10 @@ State of the Vault work, what was decided and why, what is left. The contract
 itself (paths, files, policies) is in [vault-contract.md](vault-contract.md); this
 is the story around it.
 
-- PR here: `feature/vault` (draft). Companion PR in `users`: `feature/vault-secrets`
-  (draft, backward compatible, can merge first).
-- Verified end to end against a local Vault. **Not** verified: Tailscale and the
-  real server.
+- Merged to `main` (PR #10). Companion PR in `users`: `feature/vault-secrets` (#26, also merged).
+- Verified end to end against a local Vault, then **deployed to the real platform server and
+  verified there too**: real `tpi-vault` node on the tailnet, real ACL, real `tpi-deploy` stack.
+  See [vault-server-migration.md](vault-server-migration.md) for that part.
 
 ## What exists
 
@@ -96,18 +96,21 @@ VAULT_ADDR=https://host.docker.internal:8200 docker compose up -d --build
 
 ## Left to do
 
-1. **Deploy on the server and test through Tailscale.** `gen-certs.sh <tailscale-host-or-ip>`,
-   `VAULT_BIND_ADDR` set to that address (a Vault bound to `127.0.0.1` is reachable from
-   containers on Docker Desktop only), check that a container reaches the `100.x` address,
-   and whether `tailscale cert` can replace the private CA.
+1. ~~Deploy on the server and test through Tailscale.~~ Done — see
+   [vault-server-migration.md](vault-server-migration.md).
 2. **The Tailscale part of onboarding**: a tagged auth key per team, created in the Tailscale console.
-   Everything else of the team onboarding is done (see below).
+   Everything else of the team onboarding is done (see below). Not yet exercised against the real
+   server with a real team.
 3. Backup and restore of Vault (deferred on purpose).
 4. Rotating the JWT kid (file name and `JWT_ACTIVE_KID` change together).
 5. Tailscale's free plan has 50 tagged resources: microservices, the Vault node and every
    laptop that joins with a team key all count.
 6. Sync the Vault spec artifact with the implementation (AppRole names `identity-<consumer>`,
    Agent alone on its network).
+7. The single operator account created by the real server's bootstrap (`sorias`) has a
+   generator-picked password (no interactive session available to prompt for one at bootstrap
+   time); rotate it (`vault write auth/userpass/users/sorias password=<new>`, authenticated as
+   that same operator).
 
 ## Team onboarding (added after the first version of this PR)
 
